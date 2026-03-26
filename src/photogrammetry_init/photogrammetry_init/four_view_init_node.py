@@ -136,6 +136,11 @@ class FourViewInitNode(Node):
         timer_period = 1.0 / self.offboard_rate_hz
         self.timer = self.create_timer(timer_period, self._run_mission)
         self.get_logger().info(f'four_view_init_node started. Data will be written to: {self.run_dir}')
+        self.get_logger().info(
+            f'Subscribed topics -> local_position: {self.local_position_topic}, '
+            f'vehicle_status: {self.vehicle_status_topic}, image: {self.image_topic}, '
+            f'camera_info: {self.camera_info_topic}'
+        )
 
     def _declare_parameters(self) -> None:
         params = [
@@ -240,7 +245,10 @@ class FourViewInitNode(Node):
             self.get_logger().info('First RGB image received.')
 
     def _camera_info_cb(self, msg: CameraInfo) -> None:
+        first_camera_info = self.latest_camera_info is None
         self.latest_camera_info = msg
+        if first_camera_info:
+            self.get_logger().info('First CameraInfo message received.')
         calib_path = self.calibration_dir / 'camera_info_latest.json'
         payload = {
             'width': msg.width,
@@ -344,13 +352,19 @@ class FourViewInitNode(Node):
 
         if self.phase == MissionPhase.CAPTURE:
             vp = self.viewpoints[self.view_index]
+            if self.latest_image is None:
+                self.get_logger().warn(
+                    f'No RGB image available yet at {vp.label} viewpoint; waiting before capture.',
+                    throttle_duration_sec=5.0,
+                )
+                return
             success = self._save_capture(vp)
             if success:
                 self.capture_count += 1
                 self.view_index += 1
                 self.phase = MissionPhase.MOVE_TO_VIEWPOINT
             else:
-                self.get_logger().warn('Capture failed; retrying on next cycle.')
+                self.get_logger().warn('Capture failed; retrying on next cycle.', throttle_duration_sec=2.0)
             return
 
         if self.phase == MissionPhase.FINISHED:
@@ -408,11 +422,16 @@ class FourViewInitNode(Node):
 
     def _save_capture(self, vp: Viewpoint) -> bool:
         if self.latest_image is None:
+            self.get_logger().warn('Capture skipped: latest_image is still None.')
             return False
         try:
             image_np = self._image_msg_to_cv(self.latest_image)
         except Exception as exc:  # pragma: no cover
-            self.get_logger().error(f'Image conversion failed: {exc}')
+            self.get_logger().error(
+                f'Image conversion failed: {exc}. '
+                f'encoding={self.latest_image.encoding}, '
+                f'width={self.latest_image.width}, height={self.latest_image.height}'
+            )
             return False
 
         stamp = self._image_timestamp_string(self.latest_image)

@@ -76,6 +76,15 @@ def generate_launch_description():
             parameters=[{'config_file': bridge_yaml}],
             condition=IfCondition(start_bridge),
         ),
+        
+        Node(
+    	    package='ros_gz_image',
+            executable='image_bridge',
+            name='photogrammetry_image_bridge',
+            output='screen',
+            arguments=['/rgbd/image'],
+            condition=IfCondition(start_bridge),
+        ),
 
         Node(
             package='photogrammetry_init',
