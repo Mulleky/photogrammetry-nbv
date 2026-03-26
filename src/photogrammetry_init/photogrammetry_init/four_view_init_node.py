@@ -285,13 +285,18 @@ class FourViewInitNode(Node):
         if self.phase == MissionPhase.WAIT_FOR_TOPICS:
             if self.local_position is None:
                 return
-            if self.latest_image is None:
-                self.get_logger().info('Waiting for first RGB image...', throttle_duration_sec=5.0)
-                return
+
             if not self.viewpoints:
                 return
+
+            if self.latest_image is None:
+                self.get_logger().warn(
+                    'No RGB image yet; proceeding to takeoff and will wait at the first capture point.',
+                    throttle_duration_sec=5.0,
+                )
+
             self.phase = MissionPhase.STREAM_SETPOINTS
-            self.get_logger().info('Topics ready. Streaming warmup setpoints before entering offboard.')
+            self.get_logger().info('PX4 position ready. Streaming warmup setpoints before entering offboard.')
             return
 
         if self.phase == MissionPhase.STREAM_SETPOINTS:

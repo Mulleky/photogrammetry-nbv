@@ -3,7 +3,7 @@
     # Core mission geometry (PX4 NED frame)
     object_x: 0.0
     object_y: 0.0
-    takeoff_altitude: 6.0
+    takeoff_altitude: 2.0
     capture_radius: 5.0
     capture_order: [north, south, west, east]
 
