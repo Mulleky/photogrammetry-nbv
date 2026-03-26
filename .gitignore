@@ -1,0 +1,42 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Data and heavy outputs
+data/
+datasets/
+outputs/
+results/
+reconstructions/
+*.bag
+*.db3
+*.mcap
+*.ply
+*.pcd
+*.obj
+*.stl
+*.fbx
+*.glb
+*.las
+*.laz
+*.tif
+*.tiff
+*.zip
+
+# Metashape / photogrammetry temporary artifacts
+*.psx.files/

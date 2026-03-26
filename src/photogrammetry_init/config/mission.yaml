@@ -1,0 +1,44 @@
+/**:
+  ros__parameters:
+    # Core mission geometry (PX4 NED frame)
+    object_x: 0.0
+    object_y: 0.0
+    takeoff_altitude: 6.0
+    capture_radius: 5.0
+    capture_order: [north, south, west, east]
+
+    # Motion and timing
+    offboard_rate_hz: 10.0
+    setpoint_warmup_cycles: 15
+    position_tolerance_xy: 0.35
+    position_tolerance_z: 0.35
+    settle_time_sec: 2.0
+    land_after_capture: false
+
+    # Camera / gimbal
+    gimbal_pitch_rad: -0.35
+    gimbal_yaw_rad: 0.0
+    image_format: jpg
+
+    # Output
+    output_root: ~/photogrammetry_NBV/data/photogrammetry
+
+    # PX4 topics
+    offboard_control_mode_topic: /fmu/in/offboard_control_mode
+    trajectory_setpoint_topic: /fmu/in/trajectory_setpoint
+    vehicle_command_topic: /fmu/in/vehicle_command
+
+    # IMPORTANT:
+    # Some PX4 ROS 2 setups expose these without the _v1 suffix.
+    # If your system uses /fmu/out/vehicle_local_position and /fmu/out/vehicle_status,
+    # change the next two lines accordingly.
+    local_position_topic: /fmu/out/vehicle_local_position_v1
+    vehicle_status_topic: /fmu/out/vehicle_status_v1
+
+    # Gazebo camera topics
+    image_topic: /rgbd/image
+    camera_info_topic: /rgbd/camera_info
+
+    # Optional gimbal commands (kept because the referenced repo/world expose them)
+    gimbal_pitch_topic: /gimbal/pitch
+    gimbal_yaw_topic: /gimbal/yaw

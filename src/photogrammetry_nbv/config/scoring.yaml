@@ -1,0 +1,10 @@
+scorer:
+  name: weighted_sum
+  weights:
+    weak_region_support: 1.0
+    novelty: 0.45
+    movement_cost: 0.35
+    revisit_penalty: 0.25
+  travel_distance_scale_m: 10.0
+  yaw_change_scale_rad: 3.141592653589793
+  novelty_distance_scale_m: 5.0
