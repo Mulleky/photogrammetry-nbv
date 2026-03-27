@@ -21,20 +21,17 @@ def generate_launch_description():
 
     px4_cmd = [
         'bash', '-lc',
-        ['cd ', px4_autopilot_path,
-         ' && PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=', px4_gz_world,
-         ' make px4_sitl ', px4_make_target]
-    ]
-
-    xrce_cmd = [
-    	'bash', '-lc',
-    	['/snap/bin/micro-xrce-dds-agent udp4 -p ', xrce_udp_port]
+        [
+            'cd ', px4_autopilot_path,
+            ' && PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=', px4_gz_world,
+            ' make px4_sitl ', px4_make_target
+        ]
     ]
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'px4_autopilot_path',
-            default_value='~/PX4-Autopilot',
+            default_value='/home/dreamslab/PX4-Autopilot',
             description='Absolute path to the local PX4-Autopilot checkout.',
         ),
         DeclareLaunchArgument(
@@ -52,20 +49,32 @@ def generate_launch_description():
             default_value='8888',
             description='Micro XRCE-DDS Agent UDP port.',
         ),
-        DeclareLaunchArgument('start_px4', default_value='true'),
-        DeclareLaunchArgument('start_xrce_agent', default_value='true'),
-        DeclareLaunchArgument('start_bridge', default_value='true'),
+        DeclareLaunchArgument(
+            'start_px4',
+            default_value='true',
+            description='Whether to launch PX4 SITL.',
+        ),
+        DeclareLaunchArgument(
+            'start_xrce_agent',
+            default_value='true',
+            description='Whether to launch the Micro XRCE-DDS Agent.',
+        ),
+        DeclareLaunchArgument(
+            'start_bridge',
+            default_value='true',
+            description='Whether to launch Gazebo-ROS bridges.',
+        ),
+
+        ExecuteProcess(
+            cmd=['MicroXRCEAgent', 'udp4', '-p', xrce_udp_port],
+            output='screen',
+            condition=IfCondition(start_xrce_agent),
+        ),
 
         ExecuteProcess(
             cmd=px4_cmd,
             output='screen',
             condition=IfCondition(start_px4),
-        ),
-
-        ExecuteProcess(
-            cmd=xrce_cmd,
-            output='screen',
-            condition=IfCondition(start_xrce_agent),
         ),
 
         Node(
@@ -76,9 +85,9 @@ def generate_launch_description():
             parameters=[{'config_file': bridge_yaml}],
             condition=IfCondition(start_bridge),
         ),
-        
+
         Node(
-    	    package='ros_gz_image',
+            package='ros_gz_image',
             executable='image_bridge',
             name='photogrammetry_image_bridge',
             output='screen',
