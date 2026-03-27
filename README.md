@@ -30,9 +30,8 @@ Work in progress.
 ## Commands
 ```
 source /opt/ros/jazzy/setup.bash
-
 source ~/workspaces/px4_msgs_ws/install/setup.bash
-
+colcon build --symlink-install
 source ~/photogrammetry-nbv/install/setup.bash
 
 ros2 launch photogrammetry_init photogrammetry_init.launch.py
