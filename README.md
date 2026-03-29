@@ -37,6 +37,14 @@ source install/setup.bash
 
 ros2 launch photogrammetry_init photogrammetry_init.launch.py
 ```
+Phase 2
 
+```
+source /home/dreamslab/photogrammetry-nbv/install/setup.bash
+ros2 launch photogrammetry_nbv phase2_online_mission.launch.py \
+    start_px4:=false \
+    start_xrce_agent:=false \
+    start_bridge:=false
+```
 
 
