@@ -201,6 +201,10 @@ Phase 2 consumes the seed images from Phase 1 and iteratively grows the reconstr
 
 ### Prerequisites
 
+```
+kill $(pgrep -f four_view_init_node)
+```
+
 Phase 1 must have completed and its output directory must be symlinked as `latest_seed`:
 
 ```bash
