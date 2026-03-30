@@ -40,3 +40,4 @@ reconstructions/
 
 # Metashape / photogrammetry temporary artifacts
 *.psx.files/
+src/photogrammetry_nbv/colmap_scripts/.*.request.json
