@@ -80,7 +80,8 @@ class RunPaths:
     adaptive_dir: Path
     images_dir: Path
     metadata_dir: Path
-    metashape_dir: Path
+    colmap_dir: Path
+    seed_colmap_dir: Path
     sparse_metrics_dir: Path
     candidate_dir: Path
     final_dir: Path

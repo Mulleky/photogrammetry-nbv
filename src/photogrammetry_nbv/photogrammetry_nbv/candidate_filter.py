@@ -17,7 +17,7 @@ def filter_candidates(
     survivors: List[CandidateViewpoint] = []
     for cand in candidates:
         flags: Dict[str, bool] = {}
-        flags['altitude_ok'] = max_altitude_ned <= cand.z <= min_altitude_ned
+        flags['altitude_ok'] = min_altitude_ned <= cand.z <= max_altitude_ned
         travel = _distance(current_position_xyz, [cand.x, cand.y, cand.z])
         flags['travel_ok'] = True if max_travel_m is None else travel <= max_travel_m
 

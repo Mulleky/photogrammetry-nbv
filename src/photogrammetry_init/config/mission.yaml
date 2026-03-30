@@ -5,7 +5,7 @@
     object_y: 8.0
     takeoff_altitude: 2.5
     capture_radius: 5.0
-    capture_order: [north, south, west, east]
+    ring_image_count: 12
 
     # Motion and timing
     offboard_rate_hz: 10.0

@@ -25,12 +25,14 @@ def prepare_phase2_run(seed_run_dir: Path, output_root: Path) -> Tuple[RunPaths,
     adaptive_dir = run_dir / 'adaptive'
     images_dir = adaptive_dir / 'images'
     metadata_dir = adaptive_dir / 'metadata'
-    metashape_dir = run_dir / 'metashape'
-    sparse_metrics_dir = metashape_dir / 'sparse_metrics'
-    candidate_dir = metashape_dir / 'candidate_scores'
+    colmap_dir = run_dir / 'colmap'
+    seed_colmap_dir = run_dir / 'colmap_seed_only'
+    sparse_metrics_dir = colmap_dir / 'sparse_metrics'
+    candidate_dir = colmap_dir / 'candidate_scores'
     final_dir = run_dir / 'final'
 
-    for d in [run_dir, adaptive_dir, images_dir, metadata_dir, metashape_dir, sparse_metrics_dir, candidate_dir, final_dir]:
+    for d in [run_dir, adaptive_dir, images_dir, metadata_dir, colmap_dir, seed_colmap_dir,
+              sparse_metrics_dir, candidate_dir, final_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     seed_copy_dir = run_dir / 'seed'
@@ -41,7 +43,8 @@ def prepare_phase2_run(seed_run_dir: Path, output_root: Path) -> Tuple[RunPaths,
         adaptive_dir=adaptive_dir,
         images_dir=images_dir,
         metadata_dir=metadata_dir,
-        metashape_dir=metashape_dir,
+        colmap_dir=colmap_dir,
+        seed_colmap_dir=seed_colmap_dir,
         sparse_metrics_dir=sparse_metrics_dir,
         candidate_dir=candidate_dir,
         final_dir=final_dir,

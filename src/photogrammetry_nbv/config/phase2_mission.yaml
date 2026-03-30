@@ -14,7 +14,7 @@
     candidate_radius_m: 5.5
     candidate_min_spacing_m: 1.0
     min_elevation_deg: 10.0
-    max_elevation_deg: 80.0
+    max_elevation_deg: 45.0
 
     min_altitude_ned: -20.0
     max_altitude_ned: -0.1
@@ -31,10 +31,11 @@
     gimbal_yaw_rad: 0.0
     image_format: jpg
 
-    metashape_cmd: metashape.sh
-    metashape_script_dir: ~/photogrammetry_NBV/src/photogrammetry_nbv/metashape_scripts
-    metashape_config_path: ~/photogrammetry_NBV/src/photogrammetry_nbv/config/metashape.yaml
+    colmap_bin: colmap
+    colmap_script_dir: ~/photogrammetry_NBV/src/photogrammetry_nbv/colmap_scripts
+    colmap_config_path: ~/photogrammetry_NBV/src/photogrammetry_nbv/config/colmap.yaml
     scoring_config_path: ~/photogrammetry_NBV/src/photogrammetry_nbv/config/scoring.yaml
+    eval_bbox_half_extent: 6.0
 
     offboard_control_mode_topic: /fmu/in/offboard_control_mode
     trajectory_setpoint_topic: /fmu/in/trajectory_setpoint

@@ -12,7 +12,7 @@ class BaseScorer(ABC):
 
     New scoring functions should subclass BaseScorer and return one ScoreBreakdown
     per candidate. The controller only depends on this contract, so you can replace
-    the internal score function without touching the flight or Metashape code.
+    the internal score function without touching the flight or COLMAP code.
     """
 
     def __init__(self, config: Dict):

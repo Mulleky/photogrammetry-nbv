@@ -6,13 +6,12 @@ Mission profile:
 1. Stream OffboardControlMode + TrajectorySetpoint.
 2. Switch to offboard mode and arm.
 3. Take off vertically to a fixed altitude.
-4. Visit four deterministic viewpoints around a known object of interest.
-5. At each viewpoint, face the object, wait for settle time, and save one RGB image.
-6. Hover or land.
+4. Fly a configurable CCW ring orbit around the object, capturing one image per stop.
+5. Hover or land.
 
 Notes:
 - Coordinates are interpreted in PX4 NED: +x North, +y East, +z Down.
-- Capture order defaults to North, South, West, East to match the planning brief.
+- The ring starts at the drone's spawn bearing to the object and steps CCW.
 - Topic names are parameters because PX4 DDS topic suffixes differ across setups.
 """
 
@@ -135,7 +134,7 @@ class FourViewInitNode(Node):
 
         timer_period = 1.0 / self.offboard_rate_hz
         self.timer = self.create_timer(timer_period, self._run_mission)
-        self.get_logger().info(f'four_view_init_node started. Data will be written to: {self.run_dir}')
+        self.get_logger().info(f'four_view_init_node started ({self.ring_image_count}-image ring orbit). Data will be written to: {self.run_dir}')
         self.get_logger().info(
             f'Subscribed topics -> local_position: {self.local_position_topic}, '
             f'vehicle_status: {self.vehicle_status_topic}, image: {self.image_topic}, '
@@ -148,12 +147,12 @@ class FourViewInitNode(Node):
             ('setpoint_warmup_cycles', 15),
             ('takeoff_altitude', 6.0),
             ('capture_radius', 5.0),
+            ('ring_image_count', 12),
             ('position_tolerance_xy', 0.35),
             ('position_tolerance_z', 0.35),
             ('settle_time_sec', 2.0),
             ('object_x', 0.0),
             ('object_y', 0.0),
-            ('capture_order', ['north', 'south', 'west', 'east']),
             ('land_after_capture', False),
             ('gimbal_pitch_rad', -0.35),
             ('gimbal_yaw_rad', 0.0),
@@ -178,12 +177,12 @@ class FourViewInitNode(Node):
         self.setpoint_warmup_cycles = int(gp('setpoint_warmup_cycles').value)
         self.takeoff_altitude = float(gp('takeoff_altitude').value)
         self.capture_radius = float(gp('capture_radius').value)
+        self.ring_image_count = int(gp('ring_image_count').value)
         self.position_tolerance_xy = float(gp('position_tolerance_xy').value)
         self.position_tolerance_z = float(gp('position_tolerance_z').value)
         self.settle_time_sec = float(gp('settle_time_sec').value)
         self.object_x = float(gp('object_x').value)
         self.object_y = float(gp('object_y').value)
-        self.capture_order = [str(x).lower() for x in gp('capture_order').value]
         self.land_after_capture = bool(gp('land_after_capture').value)
         self.gimbal_pitch_rad = float(gp('gimbal_pitch_rad').value)
         self.gimbal_yaw_rad = float(gp('gimbal_yaw_rad').value)
@@ -212,13 +211,13 @@ class FourViewInitNode(Node):
 
     def _write_run_manifest(self) -> None:
         manifest = {
-            'mission_type': 'photogrammetry_four_view_init',
+            'mission_type': 'photogrammetry_ring_init',
             'frame': 'PX4_NED',
             'object_x': self.object_x,
             'object_y': self.object_y,
             'takeoff_altitude_m': self.takeoff_altitude,
             'capture_radius_m': self.capture_radius,
-            'capture_order': self.capture_order,
+            'ring_image_count': self.ring_image_count,
             'land_after_capture': self.land_after_capture,
         }
         with open(self.run_dir / 'manifest.json', 'w', encoding='utf-8') as f:
@@ -263,21 +262,19 @@ class FourViewInitNode(Node):
             json.dump(payload, f, indent=2)
 
     def _build_viewpoints(self) -> List[Viewpoint]:
+        assert self.home_xy is not None
+        home_x, home_y = self.home_xy
         z = -self.takeoff_altitude
-        mapping = {
-            'north': (self.object_x + self.capture_radius, self.object_y, z),
-            'south': (self.object_x - self.capture_radius, self.object_y, z),
-            'west': (self.object_x, self.object_y - self.capture_radius, z),
-            'east': (self.object_x, self.object_y + self.capture_radius, z),
-        }
+        # Start angle: bearing from object to drone spawn (so first stop is near spawn)
+        start_angle = math.atan2(home_y - self.object_y, home_x - self.object_x)
+        step = 2.0 * math.pi / self.ring_image_count
         viewpoints: List[Viewpoint] = []
-        for label in self.capture_order:
-            if label not in mapping:
-                self.get_logger().warn(f'Ignoring unknown capture direction: {label}')
-                continue
-            x, y, z = mapping[label]
+        for i in range(self.ring_image_count):
+            angle = start_angle - i * step  # CCW in NED (decreasing atan2)
+            x = self.object_x + self.capture_radius * math.cos(angle)
+            y = self.object_y + self.capture_radius * math.sin(angle)
             yaw = self._yaw_to_object(x, y)
-            viewpoints.append(Viewpoint(label=label, x=x, y=y, z=z, yaw=yaw))
+            viewpoints.append(Viewpoint(label=f'ring_{i:02d}', x=x, y=y, z=z, yaw=yaw))
         return viewpoints
 
     def _yaw_to_object(self, x: float, y: float) -> float:
@@ -319,13 +316,13 @@ class FourViewInitNode(Node):
                     self.arm_sent = True
                     self.get_logger().info('Sent arm command.')
                 self.phase = MissionPhase.TAKEOFF
-                self.get_logger().info('Transitioning to TAKEOFF.')
+                self.get_logger().info(f'Transitioning to TAKEOFF. Ring of {self.ring_image_count} viewpoints queued.')
             return
 
         if self.phase == MissionPhase.TAKEOFF:
             if self._at_target(self.current_target):
                 self.phase = MissionPhase.MOVE_TO_VIEWPOINT
-                self.get_logger().info('Takeoff target reached. Starting four-view capture route.')
+                self.get_logger().info('Takeoff target reached. Starting ring capture route.')
             return
 
         if self.phase == MissionPhase.MOVE_TO_VIEWPOINT:

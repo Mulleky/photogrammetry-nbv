@@ -31,7 +31,7 @@ class MissionLogger:
         return path
 
     def log_sparse_metrics(self, iteration: int, snapshot: SparseMetricsSnapshot) -> Path:
-        path = self.metrics_dir / f'metashape_metrics_iter_{iteration:02d}.json'
+        path = self.metrics_dir / f'sparse_metrics_iter_{iteration:02d}.json'
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(snapshot.to_dict(), f, indent=2)
         return path

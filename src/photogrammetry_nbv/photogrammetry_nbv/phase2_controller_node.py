@@ -20,8 +20,8 @@ from std_msgs.msg import Float64
 
 from .candidate_filter import crop_to_target_count_diverse, filter_candidates
 from .candidate_generator import generate_fibonacci_hemisphere
+from .colmap_worker_client import ColmapWorkerClient
 from .contracts import CandidateViewpoint, ScoreContext
-from .metashape_worker_client import MetashapeWorkerClient
 from .metrics_extractor import load_sparse_metrics
 from .mission_logger import MissionLogger
 from .run_context import prepare_phase2_run
@@ -41,6 +41,7 @@ class Phase2State(Enum):
     RETURN_HOME = auto()
     LAND = auto()
     OFFLINE_DENSE_RECON = auto()
+    SEED_SPARSE_RECON = auto()
     FINISHED = auto()
 
 
@@ -105,8 +106,7 @@ class Phase2ControllerNode(Node):
                 'source': 'seed',
             })
 
-        self.project_path = self.paths.metashape_dir / 'project.psx'
-        self.worker = MetashapeWorkerClient(self.metashape_cmd, Path(self.metashape_script_dir).expanduser())
+        self.worker = ColmapWorkerClient(self.colmap_bin, Path(self.colmap_script_dir).expanduser())
         self.logger = MissionLogger(self.paths.candidate_dir, self.paths.sparse_metrics_dir)
         self.scorer = self._build_scorer()
 
@@ -123,12 +123,19 @@ class Phase2ControllerNode(Node):
             ('max_elevation_deg', 80.0), ('rock_center_x', 0.0), ('rock_center_y', 0.0), ('rock_center_z', 0.0),
             ('min_altitude_ned', -20.0), ('max_altitude_ned', -0.1), ('max_candidate_travel_m', 30.0),
             ('land_after_budget', True), ('gimbal_pitch_rad', -0.35), ('gimbal_yaw_rad', 0.0), ('image_format', 'jpg'),
-            ('seed_run_dir', '~/photogrammetry_NBV/data/photogrammetry/latest_seed'), ('output_root', '~/photogrammetry_NBV/data/photogrammetry'),
-            ('metashape_cmd', 'metashape.sh'), ('metashape_script_dir', '~/photogrammetry_NBV/src/photogrammetry_nbv/metashape_scripts'),
-            ('metashape_config_path', '~/photogrammetry_NBV/src/photogrammetry_nbv/config/metashape.yaml'), ('scoring_config_path', '~/photogrammetry_NBV/src/photogrammetry_nbv/config/scoring.yaml'),
-            ('offboard_control_mode_topic', '/fmu/in/offboard_control_mode'), ('trajectory_setpoint_topic', '/fmu/in/trajectory_setpoint'),
-            ('vehicle_command_topic', '/fmu/in/vehicle_command'), ('local_position_topic', '/fmu/out/vehicle_local_position_v1'),
-            ('vehicle_status_topic', '/fmu/out/vehicle_status_v1'), ('image_topic', '/rgbd/image'), ('camera_info_topic', '/rgbd/camera_info'),
+            ('seed_run_dir', '~/photogrammetry_NBV/data/photogrammetry/latest_seed'),
+            ('output_root', '~/photogrammetry_NBV/data/photogrammetry'),
+            ('colmap_bin', 'colmap'),
+            ('colmap_script_dir', '~/photogrammetry_NBV/src/photogrammetry_nbv/colmap_scripts'),
+            ('colmap_config_path', '~/photogrammetry_NBV/src/photogrammetry_nbv/config/colmap.yaml'),
+            ('scoring_config_path', '~/photogrammetry_NBV/src/photogrammetry_nbv/config/scoring.yaml'),
+            ('eval_bbox_half_extent', 6.0),
+            ('offboard_control_mode_topic', '/fmu/in/offboard_control_mode'),
+            ('trajectory_setpoint_topic', '/fmu/in/trajectory_setpoint'),
+            ('vehicle_command_topic', '/fmu/in/vehicle_command'),
+            ('local_position_topic', '/fmu/out/vehicle_local_position_v1'),
+            ('vehicle_status_topic', '/fmu/out/vehicle_status_v1'),
+            ('image_topic', '/rgbd/image'), ('camera_info_topic', '/rgbd/camera_info'),
             ('gimbal_pitch_topic', '/gimbal/pitch'), ('gimbal_yaw_topic', '/gimbal/yaw'),
         ]
         for name, default in params:
@@ -161,10 +168,11 @@ class Phase2ControllerNode(Node):
         self.image_format = str(gp('image_format').value).lower()
         self.seed_run_dir = str(gp('seed_run_dir').value)
         self.output_root = str(gp('output_root').value)
-        self.metashape_cmd = str(gp('metashape_cmd').value)
-        self.metashape_script_dir = str(gp('metashape_script_dir').value)
-        self.metashape_config_path = os.path.expanduser(str(gp('metashape_config_path').value))
+        self.colmap_bin = str(gp('colmap_bin').value)
+        self.colmap_script_dir = str(gp('colmap_script_dir').value)
+        self.colmap_config_path = os.path.expanduser(str(gp('colmap_config_path').value))
         self.scoring_config_path = os.path.expanduser(str(gp('scoring_config_path').value))
+        self.eval_bbox_half_extent = float(gp('eval_bbox_half_extent').value)
 
         self.offboard_control_mode_topic = str(gp('offboard_control_mode_topic').value)
         self.trajectory_setpoint_topic = str(gp('trajectory_setpoint_topic').value)
@@ -176,8 +184,8 @@ class Phase2ControllerNode(Node):
         self.gimbal_pitch_topic = str(gp('gimbal_pitch_topic').value)
         self.gimbal_yaw_topic = str(gp('gimbal_yaw_topic').value)
 
-        with open(self.metashape_config_path, 'r', encoding='utf-8') as f:
-            self.metashape_cfg = yaml.safe_load(f)
+        with open(self.colmap_config_path, 'r', encoding='utf-8') as f:
+            self.colmap_cfg = yaml.safe_load(f)
         with open(self.scoring_config_path, 'r', encoding='utf-8') as f:
             self.scoring_cfg = yaml.safe_load(f)
 
@@ -196,6 +204,7 @@ class Phase2ControllerNode(Node):
             'candidate_radius_m': self.candidate_radius_m,
             'rock_center_ned_m': {'x': self.rock_center_x, 'y': self.rock_center_y, 'z': self.rock_center_z},
             'scorer_name': self.scoring_cfg['scorer']['name'],
+            'eval_bbox_half_extent': self.eval_bbox_half_extent,
         }
         with open(self.paths.run_dir / 'phase2_manifest.json', 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2)
@@ -239,8 +248,9 @@ class Phase2ControllerNode(Node):
             if not self._at_target([self.home_pose['x'], self.home_pose['y'], -self.takeoff_altitude]):
                 return
             if not self.project_bootstrapped:
-                bootstrap_json = self.paths.sparse_metrics_dir / 'metrics_iter_00.json'
-                self.worker.bootstrap_project(self.project_path, self.seed_images, bootstrap_json, self.metashape_cfg)
+                metrics_json = self.paths.sparse_metrics_dir / 'metrics_iter_00.json'
+                self.worker.bootstrap_project(
+                    self.paths.colmap_dir, self.seed_images, metrics_json, self.colmap_cfg)
                 self.project_bootstrapped = True
             self.phase = Phase2State.SCORE_NEXT_VIEW
             return
@@ -250,7 +260,7 @@ class Phase2ControllerNode(Node):
                 self.phase = Phase2State.RETURN_HOME
                 return
             metrics_json = self.paths.sparse_metrics_dir / f'metrics_iter_{self.current_iteration:02d}.json'
-            self.worker.export_sparse_metrics(self.project_path, metrics_json, self.metashape_cfg)
+            self.worker.export_sparse_metrics(self.paths.colmap_dir, metrics_json, self.colmap_cfg)
             snapshot = load_sparse_metrics(metrics_json, iteration=self.current_iteration)
             self.logger.log_sparse_metrics(self.current_iteration, snapshot)
 
@@ -262,7 +272,8 @@ class Phase2ControllerNode(Node):
                 min_elevation_deg=self.min_elevation_deg,
                 max_elevation_deg=self.max_elevation_deg,
             )
-            feasible = filter_candidates(raw, current_xyz, self.min_altitude_ned, self.max_altitude_ned, self.candidate_min_spacing_m, self.max_candidate_travel_m)
+            feasible = filter_candidates(raw, current_xyz, self.min_altitude_ned, self.max_altitude_ned,
+                                         self.candidate_min_spacing_m, self.max_candidate_travel_m)
             final_pool = crop_to_target_count_diverse(feasible, self.target_candidate_count)
             self.logger.log_candidates(self.current_iteration, final_pool)
 
@@ -310,7 +321,7 @@ class Phase2ControllerNode(Node):
         if self.phase == Phase2State.UPDATE_PROJECT:
             image_path = self.paths.images_dir / self.last_capture_image_name
             metrics_json = self.paths.sparse_metrics_dir / f'metrics_iter_{self.current_iteration + 1:02d}.json'
-            self.worker.incremental_update(self.project_path, [image_path], metrics_json, self.metashape_cfg)
+            self.worker.incremental_update(self.paths.colmap_dir, [image_path], metrics_json, self.colmap_cfg)
             self.visited_viewpoints.append({
                 'position_ned_m': {'x': self.current_target[0], 'y': self.current_target[1], 'z': self.current_target[2]},
                 'yaw_rad': self.current_target_yaw,
@@ -337,7 +348,16 @@ class Phase2ControllerNode(Node):
             return
 
         if self.phase == Phase2State.OFFLINE_DENSE_RECON:
-            self.worker.offline_dense_reconstruct(self.project_path, self.paths.final_dir, self.metashape_cfg)
+            self.get_logger().info('Starting offline dense reconstruction...')
+            self.worker.offline_dense_reconstruct(self.paths.colmap_dir, self.paths.final_dir, self.colmap_cfg)
+            self.get_logger().info('Dense reconstruction done. Starting seed-only sparse cloud...')
+            self.phase = Phase2State.SEED_SPARSE_RECON
+            return
+
+        if self.phase == Phase2State.SEED_SPARSE_RECON:
+            self.worker.seed_sparse_reconstruct(
+                self.paths.seed_colmap_dir, self.seed_images, self.paths.final_dir, self.colmap_cfg)
+            self.get_logger().info('Seed sparse cloud done. Mission complete.')
             self.phase = Phase2State.FINISHED
             return
 

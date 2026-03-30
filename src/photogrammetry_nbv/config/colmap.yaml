@@ -1,0 +1,31 @@
+colmap:
+  # --- Feature extraction (SIFT) ---
+  feature_extraction:
+    camera_model: PINHOLE
+    max_num_features: 8192
+
+  # --- Feature matching ---
+  matching:
+    type: exhaustive
+
+  # --- Sparse reconstruction (mapper) ---
+  mapper:
+    ba_global_max_num_iterations: 50
+    filter_max_reproj_error: 4.0
+
+  # --- Dense reconstruction ---
+  dense:
+    max_image_size: 1000
+    geom_consistency: true
+
+  # --- Weak-region extraction (for NBV scoring) ---
+  weak_region_extraction:
+    enabled: true
+    max_regions: 12
+    top_fraction: 0.15
+    min_points_per_region: 10
+    severity_weights:
+      reconstruction_uncertainty: 0.40
+      reprojection_error: 0.30
+      track_length: 0.20
+      projection_accuracy: 0.10

@@ -13,7 +13,7 @@ setup(
         (os.path.join('share', package_name), ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
-        (os.path.join('share', package_name, 'metashape_scripts'), glob('metashape_scripts/*.py')),
+        (os.path.join('share', package_name, 'colmap_scripts'), glob('colmap_scripts/*.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
