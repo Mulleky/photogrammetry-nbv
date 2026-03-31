@@ -12,3 +12,6 @@ __pycache__/
 # Editor
 .vscode/
 *.swp
+
+# Generated request cache files
+*.request.json
