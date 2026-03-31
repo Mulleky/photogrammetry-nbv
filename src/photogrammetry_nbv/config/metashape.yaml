@@ -1,0 +1,35 @@
+metashape:
+  chunk_label: sparse_nbv_chunk
+  project_filename: project.psx
+  align:
+    downscale: 1
+    generic_preselection: true
+    reference_preselection: false
+    keypoint_limit: 40000
+    tiepoint_limit: 8000
+    reset_alignment: false
+  optimize:
+    every_n_images: 3
+    fit_f: true
+    fit_cx: true
+    fit_cy: true
+    fit_k1: true
+    fit_k2: true
+    fit_k3: false
+    fit_k4: false
+    fit_p1: true
+    fit_p2: true
+  weak_region_extraction:
+    enabled: true
+    top_fraction: 0.15
+    max_regions: 12
+    min_points_per_region: 10
+    severity_weights:
+      reconstruction_uncertainty: 0.4
+      projection_accuracy: 0.25
+      reprojection_error: 0.25
+      inverse_track_length: 0.10
+  dense:
+    quality: medium
+    filter_mode: mild
+    build_point_confidence: true

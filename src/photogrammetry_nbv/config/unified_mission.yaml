@@ -1,0 +1,58 @@
+/**:
+  ros__parameters:
+    # === Output ===
+    output_root: ~/photogrammetry_NBV/data/photogrammetry
+
+    # === Phase 1 — Seed hemisphere ===
+    seed_radius_m: 5.0
+    ring_image_count: 20
+
+    # === Phase 2 — Co-visibility NBV ===
+    rock_center_x: 0.0
+    rock_center_y: 8.0
+    rock_center_z: -0.8
+    image_budget: 15
+    max_image_budget: 35
+    stopping_criterion: knn_distance   # 'image_budget' | 'knn_distance' | 'both'
+    knn_distance_threshold: 0.05
+
+    raw_candidate_count: 200
+    target_candidate_count: 95
+    candidate_radius_m: 4.0
+    candidate_min_spacing_m: 4.0
+    min_elevation_deg: 10.0
+    max_elevation_deg: 50.0
+
+    min_altitude_ned: -20.0
+    max_altitude_ned: -0.1
+    max_candidate_travel_m: 35.0
+    land_after_budget: true
+    eval_bbox_half_extent: 6.0
+
+    # === Shared flight parameters ===
+    takeoff_altitude: 3.0
+    offboard_rate_hz: 10.0
+    setpoint_warmup_cycles: 15
+    position_tolerance_xy: 0.35
+    position_tolerance_z: 0.35
+    settle_time_sec: 2.0
+    gimbal_pitch_rad: -0.54
+    gimbal_yaw_rad: 0.0
+    image_format: jpg
+
+    # === Paths ===
+    colmap_bin: colmap
+    colmap_script_dir: ~/photogrammetry-covisibility/src/photogrammetry_nbv/colmap_scripts
+    colmap_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/colmap.yaml
+    scoring_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/scoring.yaml
+
+    # === Topics ===
+    offboard_control_mode_topic: /fmu/in/offboard_control_mode
+    trajectory_setpoint_topic: /fmu/in/trajectory_setpoint
+    vehicle_command_topic: /fmu/in/vehicle_command
+    local_position_topic: /fmu/out/vehicle_local_position_v1
+    vehicle_status_topic: /fmu/out/vehicle_status_v3
+    image_topic: /rgbd/image
+    camera_info_topic: /rgbd/camera_info
+    gimbal_pitch_topic: /gimbal/pitch
+    gimbal_yaw_topic: /gimbal/yaw
