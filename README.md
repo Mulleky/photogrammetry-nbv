@@ -48,7 +48,7 @@ Build the workspace once:
 
 ```bash
 cd ~/photogrammetry-covisibility
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
