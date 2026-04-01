@@ -28,6 +28,33 @@ def load_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
     return config.get('colmap', config)
 
 
+def find_best_sparse_model(sparse_dir: Path) -> Path:
+    """Return the sparse sub-model with the most registered images.
+
+    COLMAP mapper numbers models 0, 1, 2... but the largest component is not
+    always model 0.  Iterate all numbered subdirs, read images.bin, return the
+    one with the highest camera count.  Falls back to sparse_dir/'0' if no
+    valid model is found.
+    """
+    best_path = sparse_dir / '0'
+    best_count = -1
+    for sub in sorted(sparse_dir.iterdir()):
+        if not sub.is_dir() or not sub.name.isdigit():
+            continue
+        images_bin = sub / 'images.bin'
+        if not images_bin.exists():
+            continue
+        try:
+            with open(images_bin, 'rb') as f:
+                n = struct.unpack('<Q', f.read(8))[0]
+            if n > best_count:
+                best_count = n
+                best_path = sub
+        except Exception:
+            continue
+    return best_path
+
+
 def read_images_bin(path: Path) -> Dict[int, Dict[str, Any]]:
     """Read COLMAP images.bin and return {image_id: {name, qvec, tvec}}."""
     images = {}
@@ -160,7 +187,7 @@ def compute_knn_distances(points_xyz: np.ndarray, k: int = 5, percentile: float 
 
 def collect_sparse_summary(workspace: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Build a summary dict from a COLMAP sparse reconstruction."""
-    sparse_dir = workspace / 'sparse' / '0'
+    sparse_dir = find_best_sparse_model(workspace / 'sparse')
     images_bin = sparse_dir / 'images.bin'
     points_bin = sparse_dir / 'points3D.bin'
 

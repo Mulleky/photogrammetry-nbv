@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from common import load_cfg, load_request_json
+from common import find_best_sparse_model, load_cfg, load_request_json
 
 
 def main() -> None:
@@ -17,7 +17,7 @@ def main() -> None:
     dense_cfg = cfg.get('dense', {})
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    sparse_dir = workspace / 'sparse' / '0'
+    sparse_dir = find_best_sparse_model(workspace / 'sparse')
     dense_dir = workspace / 'dense'
     dense_dir.mkdir(parents=True, exist_ok=True)
 

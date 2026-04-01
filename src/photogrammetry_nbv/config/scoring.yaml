@@ -6,9 +6,9 @@ scorer:
     movement_cost: 0.2
     angular_separation_penalty: 0.4
   min_track_length: 2
-  min_angular_separation_deg: 30.0
+  min_angular_separation_deg: 20.0
   gimbal_pitch_rad: -0.54
   travel_distance_scale_m: 10.0
   yaw_change_scale_rad: 3.141592653589793
   novelty_distance_scale_m: 2.0
-  scoring_bbox_half_extent: 1.5
+  scoring_bbox_half_extent: 2.0

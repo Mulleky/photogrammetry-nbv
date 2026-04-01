@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from common import load_cfg, load_request_json
+from common import find_best_sparse_model, load_cfg, load_request_json
 
 
 def main() -> None:
@@ -60,7 +60,7 @@ def main() -> None:
     _run(mapper_cmd)
 
     # Export to PLY
-    sparse_model = sparse_dir / '0'
+    sparse_model = find_best_sparse_model(sparse_dir)
     ply_path = output_dir / 'seed_sparse_cloud.ply'
     _run([
         colmap_bin, 'model_converter',

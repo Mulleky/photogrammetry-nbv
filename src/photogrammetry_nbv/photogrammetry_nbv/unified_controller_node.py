@@ -146,7 +146,7 @@ class UnifiedControllerNode(Node):
         params = [
             # Shared
             ('offboard_rate_hz', 10.0), ('setpoint_warmup_cycles', 15),
-            ('takeoff_altitude', 6.0),
+            ('takeoff_altitude', 3.0),
             ('position_tolerance_xy', 0.35), ('position_tolerance_z', 0.35),
             ('settle_time_sec', 2.0),
             ('gimbal_pitch_rad', -0.35), ('gimbal_yaw_rad', 0.0),
@@ -154,6 +154,7 @@ class UnifiedControllerNode(Node):
             ('output_root', '~/photogrammetry_NBV/data/photogrammetry'),
             # Phase 1 — seed hemisphere
             ('seed_radius_m', 2.0), ('ring_image_count', 20),
+            ('seed_min_elevation_deg', 5.0), ('seed_max_elevation_deg', 20.0),
             # Phase 2 — NBV
             ('rock_center_x', 0.0), ('rock_center_y', 0.0), ('rock_center_z', 0.0),
             ('image_budget', 20), ('max_image_budget', 30),
@@ -201,6 +202,8 @@ class UnifiedControllerNode(Node):
         # Phase 1
         self.seed_radius_m = float(gp('seed_radius_m').value)
         self.ring_image_count = int(gp('ring_image_count').value)
+        self.seed_min_elevation_deg = float(gp('seed_min_elevation_deg').value)
+        self.seed_max_elevation_deg = float(gp('seed_max_elevation_deg').value)
 
         # Phase 2
         self.rock_center_x = float(gp('rock_center_x').value)
@@ -319,8 +322,8 @@ class UnifiedControllerNode(Node):
             center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
             radius=self.seed_radius_m,
             candidate_count=self.ring_image_count,
-            min_elevation_deg=self.min_elevation_deg,
-            max_elevation_deg=self.max_elevation_deg,
+            min_elevation_deg=self.seed_min_elevation_deg,
+            max_elevation_deg=self.seed_max_elevation_deg,
         )
         vps = []
         for i, cand in enumerate(raw):

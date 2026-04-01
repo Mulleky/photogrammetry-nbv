@@ -53,7 +53,7 @@ def generate_fibonacci_hemisphere(
 
         x = cx + radius * x_u
         y = cy + radius * y_u
-        z = cz - radius * abs(z_unit) if z_mode == 'above_object' else cz + radius * z_unit
+        z = cz - radius * z_unit if z_mode == 'above_object' else cz + radius * z_unit
 
         dx = cx - x
         dy = cy - y

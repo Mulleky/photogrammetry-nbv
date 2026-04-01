@@ -6,21 +6,23 @@
     # === Phase 1 — Seed hemisphere ===
     seed_radius_m: 5.0
     ring_image_count: 20
+    seed_min_elevation_deg: 15.0
+    seed_max_elevation_deg: 50.0
 
     # === Phase 2 — Co-visibility NBV ===
     rock_center_x: 0.0
     rock_center_y: 8.0
     rock_center_z: -0.8
-    image_budget: 15
+    image_budget: 25
     max_image_budget: 35
-    stopping_criterion: knn_distance   # 'image_budget' | 'knn_distance' | 'both'
-    knn_distance_threshold: 0.05
+    stopping_criterion: both   # 'image_budget' | 'knn_distance' | 'both'
+    knn_distance_threshold: 0.005
 
     raw_candidate_count: 200
     target_candidate_count: 95
-    candidate_radius_m: 4.0
+    candidate_radius_m: 2.5
     candidate_min_spacing_m: 4.0
-    min_elevation_deg: 10.0
+    min_elevation_deg: 5.0
     max_elevation_deg: 50.0
 
     min_altitude_ned: -20.0
