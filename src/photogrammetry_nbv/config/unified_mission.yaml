@@ -15,21 +15,35 @@
     rock_center_z: -0.8
     image_budget: 30
     max_image_budget: 45
-    stopping_criterion: both   # 'image_budget' | 'knn_distance' | 'both'
-    knn_distance_threshold: 0.005
+    stopping_criterion: image_budget   # 'image_budget' | 'knn_distance' | 'both'
+    knn_distance_threshold: 0.003
 
     raw_candidate_count: 500
     target_candidate_count: 120
-    candidate_radius_m: 3.0
-    candidate_min_spacing_m: 1.25
-    min_elevation_deg: 5.0
-    max_elevation_deg: 35.0
+    candidate_radius_m: 3.5
+    candidate_min_spacing_m: 0.4
+    min_elevation_deg: 10.0
+    max_elevation_deg: 40.0
 
     min_altitude_ned: -20.0
-    max_altitude_ned: -0.1
-    max_candidate_travel_m: 35.0
+    max_altitude_ned: -1.5
+    max_candidate_travel_m: 40.0
     land_after_budget: true
     eval_bbox_half_extent: 6.0
+
+    # === Planner mode ===
+    seed_planner_mode: stratified         # 'fibonacci' | 'stratified'
+    seed_elevation_rings_deg: [15.0, 25.0, 35.0, 45.0]
+    seed_azimuth_counts: [8, 6, 4, 2]
+
+    phase2_planner_mode: hybrid           # 'fibonacci' | 'stratified' | 'hybrid'
+    phase2_lateral_elevations_deg: [15.0, 25.0, 35.0]
+    phase2_upper_elevations_deg: [30.0, 40.0]
+    phase2_lateral_candidate_count: 96
+    phase2_upper_candidate_count: 30
+
+    azimuth_sector_count: 8
+    adaptive_revisit_exclusion_m: 1.0
 
     # === Shared flight parameters ===
     takeoff_altitude: 3.0

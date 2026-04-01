@@ -57,6 +57,21 @@ class ColmapWorkerClient:
             'config': config,
         })
 
+    def export_model_ply(self, model_dir: Path, ply_path: Path) -> None:
+        """Export a COLMAP sparse model directory to a PLY point cloud."""
+        ply_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            self.colmap_bin, 'model_converter',
+            '--input_path', str(model_dir),
+            '--output_path', str(ply_path),
+            '--output_type', 'PLY',
+        ]
+        completed = subprocess.run(cmd, capture_output=True, text=True)
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f'COLMAP model_converter failed\n'
+                f'STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}')
+
     def _run_script(self, script_name: str, args: Dict) -> None:
         request_json = self.script_dir / f'.{script_name}.request.json'
         with open(request_json, 'w', encoding='utf-8') as f:

@@ -458,6 +458,11 @@ def load_score_evolution(run_dir: Path) -> List[Dict]:
 
 
 def _find_seed_images_bin(run_dir: Path) -> Optional[Path]:
+    # Bootstrap snapshot (preferred): single connected model with correct scale
+    snapshot_ib = run_dir / 'colmap' / 'seed_sparse_snapshot' / 'images.bin'
+    if snapshot_ib.exists():
+        return snapshot_ib
+    # Fallback: standalone seed_colmap sub-models (may be fragmented)
     for sub in ('0', '1', '2'):
         p = run_dir / 'seed_colmap' / 'sparse' / sub / 'images.bin'
         if p.exists():
@@ -801,8 +806,8 @@ def main() -> None:
     ap.add_argument('--gate-dist-m', type=float, default=0.05,
                     help='Distance gate vs GT surface (m)')
     ap.add_argument('--thresholds', nargs='+', type=float,
-                    default=[0.005, 0.01, 0.02, 0.05],
-                    help='Metric thresholds (m)')
+                    default=[0.016, 0.032, 0.048, 0.064, 0.080],
+                    help='Metric thresholds (m). Defaults are 1-5%% of 1.6m rock height.')
     ap.add_argument('--gt-samples', type=int, default=100_000,
                     help='GT surface samples')
     ap.add_argument('--output-dir', default=None,

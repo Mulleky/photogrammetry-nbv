@@ -21,7 +21,7 @@ except Exception:
 if str(_COLMAP_SCRIPTS) not in _sys.path:
     _sys.path.insert(0, str(_COLMAP_SCRIPTS))
 
-from common import read_points3d_bin_with_tracks, read_cameras_bin, read_images_bin  # type: ignore
+from common import read_points3d_bin_with_tracks, read_cameras_bin, read_images_bin, find_best_sparse_model  # type: ignore
 
 
 class CovisibilityScorer(BaseScorer):
@@ -51,7 +51,7 @@ class CovisibilityScorer(BaseScorer):
             # Fallback: return zero scores if no workspace available
             return self._zero_scores(candidates)
 
-        sparse_dir = workspace / 'sparse' / '0'
+        sparse_dir = find_best_sparse_model(workspace / 'sparse')
         points3d_path = sparse_dir / 'points3D.bin'
         cameras_path = sparse_dir / 'cameras.bin'
         images_path = sparse_dir / 'images.bin'

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
-from typing import List
+from collections import Counter
+from dataclasses import replace
+from typing import List, Union
 
 from .contracts import CandidateViewpoint
 
@@ -93,3 +95,190 @@ def generate_fibonacci_hemisphere(
         )
 
     return result
+
+
+def generate_stratified_orbit_candidates(
+    center_xyz: List[float],
+    radius: float,
+    elevation_rings_deg: List[float],
+    azimuth_count_per_ring: Union[int, List[int]],
+    z_mode: str = 'above_object',
+    candidate_prefix: str = 'cand',
+    azimuth_sector_count: int = 8,
+) -> List[CandidateViewpoint]:
+    """
+    Generate viewpoints on explicit elevation rings, uniformly spaced in azimuth.
+
+    Unlike the Fibonacci generator, this places deterministic rings so lateral
+    (low-elevation) coverage is explicit rather than an artefact of band sampling.
+    Each candidate has planner metadata stored in .extra.
+    """
+    if not elevation_rings_deg:
+        return []
+
+    # Normalise azimuth_count_per_ring to a list
+    if isinstance(azimuth_count_per_ring, int):
+        counts = [azimuth_count_per_ring] * len(elevation_rings_deg)
+    else:
+        counts = list(azimuth_count_per_ring)
+        if len(counts) != len(elevation_rings_deg):
+            raise ValueError(
+                'azimuth_count_per_ring length must match elevation_rings_deg length')
+
+    cx, cy, cz = center_xyz
+    all_candidates: List[CandidateViewpoint] = []
+
+    for ring_idx, (el_deg, n) in enumerate(zip(elevation_rings_deg, counts)):
+        if n <= 0:
+            continue
+        el_rad = math.radians(el_deg)
+        planner_band = 'lateral' if el_deg <= 25.0 else 'upper'
+        sector_width = 360.0 / azimuth_sector_count
+
+        for k in range(n):
+            az_deg = 360.0 * k / n
+            az_rad = math.radians(az_deg)
+
+            x = cx + radius * math.cos(el_rad) * math.cos(az_rad)
+            y = cy + radius * math.cos(el_rad) * math.sin(az_rad)
+            if z_mode == 'above_object':
+                z = cz - radius * math.sin(el_rad)
+            else:
+                z = cz + radius * math.sin(el_rad)
+
+            yaw = math.atan2(cy - y, cx - x)
+            sector = int(az_deg / sector_width) % azimuth_sector_count
+
+            all_candidates.append(
+                CandidateViewpoint(
+                    candidate_id=f'{candidate_prefix}_{len(all_candidates):03d}',
+                    x=float(x),
+                    y=float(y),
+                    z=float(z),
+                    yaw=float(yaw),
+                    radius=float(radius),
+                    azimuth_rad=float(az_rad),
+                    elevation_rad=float(el_rad),
+                    extra={
+                        'planner_mode': 'stratified',
+                        'planner_band': planner_band,
+                        'ring_index': ring_idx,
+                        'ring_elevation_deg': el_deg,
+                        'azimuth_sector': sector,
+                    },
+                )
+            )
+
+    # Re-index with final prefix
+    return [
+        replace(c, candidate_id=f'{candidate_prefix}_{idx:03d}')
+        for idx, c in enumerate(all_candidates)
+    ]
+
+
+def generate_hybrid_candidates(
+    center_xyz: List[float],
+    radius: float,
+    lateral_elevations_deg: List[float],
+    upper_elevations_deg: List[float],
+    lateral_count: int,
+    upper_count: int,
+    z_mode: str = 'above_object',
+) -> List[CandidateViewpoint]:
+    """
+    Build a two-band candidate pool: a dense lateral belt plus a sparse upper support band.
+
+    lateral_count viewpoints are distributed across lateral_elevations_deg with more
+    samples on lower rings (inverse-rank weighting). upper_count viewpoints are split
+    evenly across upper_elevations_deg.
+    """
+    # --- Lateral band ---
+    if lateral_elevations_deg and lateral_count > 0:
+        n_lat = len(lateral_elevations_deg)
+        # Inverse-rank weights: ring 0 gets most viewpoints
+        raw_weights = [1.0 / (i + 1) for i in range(n_lat)]
+        total_w = sum(raw_weights)
+        lat_counts = [max(1, round(lateral_count * w / total_w)) for w in raw_weights]
+        # Correct rounding drift against target
+        diff = sum(lat_counts) - lateral_count
+        if diff != 0:
+            lat_counts[-1] = max(1, lat_counts[-1] - diff)
+        lateral = generate_stratified_orbit_candidates(
+            center_xyz, radius, lateral_elevations_deg, lat_counts,
+            z_mode=z_mode, candidate_prefix='lat',
+        )
+        for c in lateral:
+            c.extra['planner_band'] = 'lateral'
+    else:
+        lateral = []
+
+    # --- Upper band ---
+    if upper_elevations_deg and upper_count > 0:
+        n_upp = len(upper_elevations_deg)
+        per_ring = max(1, upper_count // n_upp)
+        upp_counts = [per_ring] * n_upp
+        # Distribute remainder to first rings
+        remainder = upper_count - sum(upp_counts)
+        for i in range(abs(remainder)):
+            if remainder > 0:
+                upp_counts[i % n_upp] += 1
+            else:
+                upp_counts[-(i % n_upp) - 1] = max(1, upp_counts[-(i % n_upp) - 1] - 1)
+        upper = generate_stratified_orbit_candidates(
+            center_xyz, radius, upper_elevations_deg, upp_counts,
+            z_mode=z_mode, candidate_prefix='upp',
+        )
+        for c in upper:
+            c.extra['planner_band'] = 'upper'
+    else:
+        upper = []
+
+    combined = lateral + upper
+    # Re-index all IDs globally
+    return [replace(c, candidate_id=f'cand_{idx:03d}') for idx, c in enumerate(combined)]
+
+
+def balance_candidates_by_coverage(
+    candidates: List[CandidateViewpoint],
+    visited_xyzs: List[tuple],
+    rock_center_xyz: List[float],
+    azimuth_sector_count: int,
+    target_count: int,
+) -> List[CandidateViewpoint]:
+    """
+    Prefer candidates from azimuth sectors that have fewest prior adaptive visits.
+
+    Within each sector, candidates are ordered to preserve elevation diversity
+    (sorted by elevation so alternating low/high are kept as we truncate).
+    The scorer is not invoked here — this is a planning-only reordering.
+    """
+    if not candidates or target_count <= 0:
+        return []
+
+    cx, cy, _ = rock_center_xyz
+    sector_width = 360.0 / azimuth_sector_count
+
+    # Count how many visited viewpoints are in each sector
+    visited_sector_count: Counter = Counter()
+    for vx, vy, _vz in visited_xyzs:
+        az = math.degrees(math.atan2(vy - cy, vx - cx)) % 360.0
+        s = int(az / sector_width) % azimuth_sector_count
+        visited_sector_count[s] += 1
+
+    # Tag each candidate with its azimuth sector (may already be set)
+    tagged: List[CandidateViewpoint] = []
+    for c in candidates:
+        az = math.degrees(math.atan2(c.y - cy, c.x - cx)) % 360.0
+        sector = int(az / sector_width) % azimuth_sector_count
+        updated_extra = dict(c.extra)
+        updated_extra['azimuth_sector'] = sector
+        tagged.append(replace(c, extra=updated_extra))
+
+    # Sort: primary key = visited count in sector (ascending = prefer under-covered),
+    # secondary key = elevation (descending = prefer higher/safer candidates within each sector)
+    tagged.sort(key=lambda c: (
+        visited_sector_count.get(c.extra['azimuth_sector'], 0),
+        -c.elevation_rad,
+    ))
+
+    return tagged[:target_count]

@@ -16,6 +16,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
+import struct
+import threading
 import time
 from enum import Enum, auto
 from pathlib import Path
@@ -38,7 +41,12 @@ from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Float64
 
 from .candidate_filter import crop_to_target_count_diverse, filter_candidates
-from .candidate_generator import generate_fibonacci_hemisphere
+from .candidate_generator import (
+    generate_fibonacci_hemisphere,
+    generate_stratified_orbit_candidates,
+    generate_hybrid_candidates,
+    balance_candidates_by_coverage,
+)
 from .colmap_worker_client import ColmapWorkerClient
 from .contracts import CandidateViewpoint, ScoreContext
 from .metrics_extractor import load_sparse_metrics
@@ -131,6 +139,13 @@ class UnifiedControllerNode(Node):
         self.visited_viewpoints: List[Dict] = []
         self.last_capture_image_name: Optional[str] = None
 
+        # Async COLMAP threads (prevent blocking the offboard setpoint loop)
+        self._colmap_thread: Optional[threading.Thread] = None
+        self._colmap_error: Optional[Exception] = None
+        self._score_thread: Optional[threading.Thread] = None
+        self._score_result = None
+        self._score_error: Optional[Exception] = None
+
         # ---- Output directories ----
         self._prepare_output_dirs()
 
@@ -167,6 +182,19 @@ class UnifiedControllerNode(Node):
             ('max_candidate_travel_m', 30.0),
             ('land_after_budget', True),
             ('eval_bbox_half_extent', 6.0),
+            # Planner mode — seed
+            ('seed_planner_mode', 'stratified'),
+            ('seed_elevation_rings_deg', [5.0, 15.0, 25.0, 40.0]),
+            ('seed_azimuth_counts', [10, 8, 4, 2]),
+            # Planner mode — phase2
+            ('phase2_planner_mode', 'hybrid'),
+            ('phase2_lateral_elevations_deg', [0.0, 10.0, 20.0]),
+            ('phase2_upper_elevations_deg', [30.0, 40.0]),
+            ('phase2_lateral_candidate_count', 84),
+            ('phase2_upper_candidate_count', 36),
+            # Coverage balancing
+            ('azimuth_sector_count', 8),
+            ('adaptive_revisit_exclusion_m', 1.0),
             # Paths
             ('colmap_bin', 'colmap'),
             ('colmap_script_dir', '~/photogrammetry-covisibility/src/photogrammetry_nbv/colmap_scripts'),
@@ -224,6 +252,17 @@ class UnifiedControllerNode(Node):
         self.max_candidate_travel_m = float(gp('max_candidate_travel_m').value)
         self.land_after_budget = bool(gp('land_after_budget').value)
         self.eval_bbox_half_extent = float(gp('eval_bbox_half_extent').value)
+
+        self.seed_planner_mode = str(gp('seed_planner_mode').value)
+        self.seed_elevation_rings_deg = list(gp('seed_elevation_rings_deg').value)
+        self.seed_azimuth_counts = list(gp('seed_azimuth_counts').value)
+        self.phase2_planner_mode = str(gp('phase2_planner_mode').value)
+        self.phase2_lateral_elevations_deg = list(gp('phase2_lateral_elevations_deg').value)
+        self.phase2_upper_elevations_deg = list(gp('phase2_upper_elevations_deg').value)
+        self.phase2_lateral_candidate_count = int(gp('phase2_lateral_candidate_count').value)
+        self.phase2_upper_candidate_count = int(gp('phase2_upper_candidate_count').value)
+        self.azimuth_sector_count = int(gp('azimuth_sector_count').value)
+        self.adaptive_revisit_exclusion_m = float(gp('adaptive_revisit_exclusion_m').value)
 
         self.colmap_bin = str(gp('colmap_bin').value)
         self.colmap_script_dir = str(gp('colmap_script_dir').value)
@@ -318,13 +357,21 @@ class UnifiedControllerNode(Node):
     # ==================================================================
 
     def _build_seed_viewpoints(self) -> List[dict]:
-        raw = generate_fibonacci_hemisphere(
-            center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
-            radius=self.seed_radius_m,
-            candidate_count=self.ring_image_count,
-            min_elevation_deg=self.seed_min_elevation_deg,
-            max_elevation_deg=self.seed_max_elevation_deg,
-        )
+        if self.seed_planner_mode == 'stratified':
+            raw = generate_stratified_orbit_candidates(
+                center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                radius=self.seed_radius_m,
+                elevation_rings_deg=self.seed_elevation_rings_deg,
+                azimuth_count_per_ring=self.seed_azimuth_counts,
+            )
+        else:  # 'fibonacci' — backward-compatible fallback
+            raw = generate_fibonacci_hemisphere(
+                center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                radius=self.seed_radius_m,
+                candidate_count=self.ring_image_count,
+                min_elevation_deg=self.seed_min_elevation_deg,
+                max_elevation_deg=self.seed_max_elevation_deg,
+            )
         vps = []
         for i, cand in enumerate(raw):
             dx = self.rock_center_x - cand.x
@@ -600,15 +647,60 @@ class UnifiedControllerNode(Node):
                         f'NBV scoring may be unreliable.')
                 else:
                     self.get_logger().info(f'[Phase2] COLMAP bootstrapped with seed images. Sparse points: {pt_count}')
+
+                # Save a snapshot of the bootstrap sparse model so the seed-baseline
+                # eval uses the fully-connected model (all 20 cameras, correct scale)
+                # rather than the standalone reconstruction that typically fragments.
+                _sparse_dir = self.colmap_dir / 'sparse'
+                _best, _best_count = _sparse_dir / '0', -1
+                for _sub in sorted(_sparse_dir.iterdir()):
+                    if _sub.is_dir() and _sub.name.isdigit() and (_sub / 'images.bin').exists():
+                        with open(_sub / 'images.bin', 'rb') as _f:
+                            _n = struct.unpack('<Q', _f.read(8))[0]
+                        if _n > _best_count:
+                            _best_count, _best = _n, _sub
+                _snapshot = self.colmap_dir / 'seed_sparse_snapshot'
+                if _snapshot.exists():
+                    shutil.rmtree(str(_snapshot))
+                shutil.copytree(str(_best), str(_snapshot))
+                self.get_logger().info(
+                    f'[Phase2] Saved bootstrap sparse snapshot ({_best_count} cameras) → seed_sparse_snapshot/')
+
             self.state = State.SCORE_NEXT_VIEW
             return
 
         # --- Phase 2: NBV loop ---
         if self.state == State.SCORE_NEXT_VIEW:
-            # Export metrics first so stopping criterion can use kNN
-            metrics_json = self.sparse_metrics_dir / f'metrics_iter_{self.current_iteration:02d}.json'
-            self.worker.export_sparse_metrics(self.colmap_dir, metrics_json, self.colmap_cfg)
-            snapshot = load_sparse_metrics(metrics_json, iteration=self.current_iteration)
+            # --- Async export_sparse_metrics (non-blocking) ---
+            if self._score_thread is None and self._score_result is None:
+                metrics_json = self.sparse_metrics_dir / f'metrics_iter_{self.current_iteration:02d}.json'
+                self._score_error = None
+
+                def _do_export(colmap_dir=self.colmap_dir, mj=metrics_json, cfg=self.colmap_cfg,
+                               it=self.current_iteration):
+                    try:
+                        self.worker.export_sparse_metrics(colmap_dir, mj, cfg)
+                        self._score_result = load_sparse_metrics(mj, iteration=it)
+                    except Exception as exc:
+                        self._score_error = exc
+
+                self._score_thread = threading.Thread(target=_do_export, daemon=True)
+                self._score_thread.start()
+                self.get_logger().info('[Phase2] export_sparse_metrics started in background...')
+                return  # keep publishing offboard setpoints
+
+            if self._score_thread is not None and self._score_thread.is_alive():
+                return  # still exporting — keep publishing offboard setpoints
+
+            # Export finished
+            self._score_thread = None
+            if self._score_error:
+                self.get_logger().error(f'[Phase2] export_sparse_metrics failed: {self._score_error}')
+                self.state = State.RETURN_HOME
+                return
+
+            snapshot = self._score_result
+            self._score_result = None  # reset for next iteration
             self.logger.log_sparse_metrics(self.current_iteration, snapshot)
 
             if self._should_stop(snapshot):
@@ -619,15 +711,36 @@ class UnifiedControllerNode(Node):
                 return
 
             current_xyz = self._current_position_xyz()
-            raw = generate_fibonacci_hemisphere(
-                center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
-                radius=self.candidate_radius_m,
-                candidate_count=self.raw_candidate_count,
-                min_elevation_deg=self.min_elevation_deg,
-                max_elevation_deg=self.max_elevation_deg,
-            )
+            if self.phase2_planner_mode == 'hybrid':
+                raw = generate_hybrid_candidates(
+                    center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                    radius=self.candidate_radius_m,
+                    lateral_elevations_deg=self.phase2_lateral_elevations_deg,
+                    upper_elevations_deg=self.phase2_upper_elevations_deg,
+                    lateral_count=self.phase2_lateral_candidate_count,
+                    upper_count=self.phase2_upper_candidate_count,
+                )
+            elif self.phase2_planner_mode == 'stratified':
+                raw = generate_stratified_orbit_candidates(
+                    center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                    radius=self.candidate_radius_m,
+                    elevation_rings_deg=self.phase2_lateral_elevations_deg + self.phase2_upper_elevations_deg,
+                    azimuth_count_per_ring=self.azimuth_sector_count,
+                )
+            else:  # 'fibonacci' fallback
+                raw = generate_fibonacci_hemisphere(
+                    center_xyz=[self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                    radius=self.candidate_radius_m,
+                    candidate_count=self.raw_candidate_count,
+                    min_elevation_deg=self.min_elevation_deg,
+                    max_elevation_deg=self.max_elevation_deg,
+                )
+            self.get_logger().info(f'[Phase2] Raw pool: {len(raw)} candidates')
+
             feasible = filter_candidates(raw, current_xyz, self.min_altitude_ned, self.max_altitude_ned,
                                          self.candidate_min_spacing_m, self.max_candidate_travel_m)
+            self.get_logger().info(f'[Phase2] Feasible after altitude/travel filter: {len(feasible)}')
+
             # Hard-exclude candidates too close to previously visited NBV viewpoints.
             # Seed viewpoints (source='seed') are excluded from this check — they orbit
             # at a different radius and would otherwise block all NBV candidates.
@@ -637,7 +750,7 @@ class UnifiedControllerNode(Node):
                 if 'position_ned_m' in vp and vp.get('source') == 'adaptive'
             ]
             if nbv_xyzs:
-                min_revisit_dist = self.candidate_min_spacing_m
+                min_revisit_dist = self.adaptive_revisit_exclusion_m
                 feasible = [
                     c for c in feasible
                     if all(
@@ -645,8 +758,30 @@ class UnifiedControllerNode(Node):
                         for vx, vy, vz in nbv_xyzs
                     )
                 ]
+            self.get_logger().info(f'[Phase2] After revisit exclusion: {len(feasible)}')
+
+            feasible = balance_candidates_by_coverage(
+                feasible,
+                nbv_xyzs,
+                [self.rock_center_x, self.rock_center_y, self.rock_center_z],
+                self.azimuth_sector_count,
+                self.target_candidate_count,
+            )
+            self.get_logger().info(f'[Phase2] After azimuth balancing: {len(feasible)}')
+
             final_pool = crop_to_target_count_diverse(feasible, self.target_candidate_count)
             self.logger.log_candidates(self.current_iteration, final_pool)
+
+            from collections import Counter as _Counter
+            band_dist = _Counter(c.extra.get('planner_band', 'unknown') for c in final_pool)
+            sector_dist = _Counter(c.extra.get('azimuth_sector', -1) for c in final_pool)
+            el_dist = _Counter(round(math.degrees(c.elevation_rad)) for c in final_pool)
+            self.get_logger().info(
+                f'[Phase2] Final pool {len(final_pool)}: '
+                f'bands={dict(band_dist)}, '
+                f'sectors={dict(sector_dist)}, '
+                f'elev_deg={dict(el_dist)}'
+            )
 
             if not final_pool:
                 self.get_logger().error(
@@ -713,9 +848,34 @@ class UnifiedControllerNode(Node):
             return
 
         if self.state == State.UPDATE_PROJECT:
-            image_path = self.adaptive_images_dir / self.last_capture_image_name
-            metrics_json = self.sparse_metrics_dir / f'metrics_iter_{self.current_iteration + 1:02d}.json'
-            self.worker.incremental_update(self.colmap_dir, [image_path], metrics_json, self.colmap_cfg)
+            # --- Async incremental_update (non-blocking) ---
+            if self._colmap_thread is None:
+                image_path = self.adaptive_images_dir / self.last_capture_image_name
+                metrics_json = self.sparse_metrics_dir / f'metrics_iter_{self.current_iteration + 1:02d}.json'
+                self._colmap_error = None
+
+                def _do_update(colmap_dir=self.colmap_dir, ip=image_path, mj=metrics_json,
+                               cfg=self.colmap_cfg):
+                    try:
+                        self.worker.incremental_update(colmap_dir, [ip], mj, cfg)
+                    except Exception as exc:
+                        self._colmap_error = exc
+
+                self._colmap_thread = threading.Thread(target=_do_update, daemon=True)
+                self._colmap_thread.start()
+                self.get_logger().info('[Phase2] COLMAP incremental_update started in background...')
+                return  # keep publishing offboard setpoints
+
+            if self._colmap_thread.is_alive():
+                return  # still running — keep publishing offboard setpoints
+
+            # Thread finished
+            self._colmap_thread = None
+            if self._colmap_error:
+                self.get_logger().error(f'[Phase2] COLMAP incremental_update failed: {self._colmap_error}')
+                self.state = State.RETURN_HOME
+                return
+
             self.visited_viewpoints.append({
                 'position_ned_m': {
                     'x': self.current_target[0],
@@ -760,13 +920,23 @@ class UnifiedControllerNode(Node):
             return
 
         if self.state == State.SEED_SPARSE_RECON:
-            self.get_logger().info('[Wrap-up] Exporting seed-only sparse cloud...')
-            try:
-                self.worker.seed_sparse_reconstruct(
-                    self.seed_colmap_dir, self.seed_images_captured, self.final_dir, self.colmap_cfg)
-                self.get_logger().info('[Wrap-up] Seed sparse cloud done. Mission complete.')
-            except RuntimeError as e:
-                self.get_logger().error(f'[Wrap-up] Seed sparse reconstruction failed:\n{e}')
+            snapshot = self.colmap_dir / 'seed_sparse_snapshot'
+            if snapshot.exists():
+                self.get_logger().info('[Wrap-up] Exporting seed sparse snapshot as PLY...')
+                try:
+                    self.worker.export_model_ply(snapshot, self.final_dir / 'seed_sparse_cloud.ply')
+                    self.get_logger().info('[Wrap-up] Seed sparse cloud exported from bootstrap snapshot.')
+                except RuntimeError as e:
+                    self.get_logger().error(f'[Wrap-up] Seed sparse PLY export failed:\n{e}')
+            else:
+                # Fallback for runs that pre-date the snapshot feature
+                self.get_logger().info('[Wrap-up] No snapshot found — running standalone seed reconstruction...')
+                try:
+                    self.worker.seed_sparse_reconstruct(
+                        self.seed_colmap_dir, self.seed_images_captured, self.final_dir, self.colmap_cfg)
+                    self.get_logger().info('[Wrap-up] Seed sparse cloud done.')
+                except RuntimeError as e:
+                    self.get_logger().error(f'[Wrap-up] Seed sparse reconstruction failed:\n{e}')
             self.state = State.FINISHED
             return
 
