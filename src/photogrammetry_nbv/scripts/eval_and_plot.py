@@ -505,13 +505,13 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
     bw = 0.35
     x = np.arange(len(t_labels))
 
-    fig = plt.figure(figsize=(17, 13))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     fig.suptitle('Reconstruction Quality Evaluation', fontsize=14,
-                 fontweight='bold', y=0.99)
-    gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.50, wspace=0.38)
+                 fontweight='bold', y=1.02)
 
-    # ── F-score (top, spanning 2 cols) ─────────────────────────────────────
-    ax_f = fig.add_subplot(gs[0, :2])
+    ax_f, ax_c, ax_a = axes
+
+    # ── F-score ─────────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'fscore_{tl}'] for tl in t_labels]
         offset = (i - len(cloud_labels) / 2 + 0.5) * bw
@@ -523,8 +523,7 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
     ax_f.set_ylim(0, 108); ax_f.legend(fontsize=9)
     ax_f.grid(axis='y', alpha=0.35, zorder=0)
 
-    # ── Completeness (mid-left) ─────────────────────────────────────────────
-    ax_c = fig.add_subplot(gs[1, 0])
+    # ── Completeness ─────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'completeness_{tl}'] for tl in t_labels]
         ax_c.plot(t_labels, vals, marker='o', label=lbl,
@@ -532,8 +531,7 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
     ax_c.set_ylabel('Completeness (%)'); ax_c.set_title('Completeness')
     ax_c.set_ylim(0, 108); ax_c.legend(fontsize=8); ax_c.grid(alpha=0.3)
 
-    # ── Accuracy (mid-centre) ───────────────────────────────────────────────
-    ax_a = fig.add_subplot(gs[1, 1])
+    # ── Accuracy ─────────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'accuracy_{tl}'] for tl in t_labels]
         ax_a.plot(t_labels, vals, marker='s', label=lbl,
@@ -542,112 +540,105 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
     ax_a.set_ylim(0, 108); ax_a.legend(fontsize=8); ax_a.grid(alpha=0.3)
 
     # ── C2C distances (mid-right) ───────────────────────────────────────────
-    ax_d = fig.add_subplot(gs[1, 2])
-    c2c_keys = ['mean_c2c_m', 'median_c2c_m', 'p95_c2c_m']
-    c2c_names = ['Mean', 'Median', 'P95']
-    xd = np.arange(3)
-    for i, lbl in enumerate(cloud_labels):
-        vals = [report['clouds'][lbl]['metrics'][k] * 1000 for k in c2c_keys]
-        offset = (i - len(cloud_labels) / 2 + 0.5) * bw
-        bars = ax_d.bar(xd + offset, vals, bw, label=lbl,
-                        color=bar_colors[i % len(bar_colors)])
-        _bar_labels(ax_d, bars, fmt='{:.0f}')
-    ax_d.set_xticks(xd); ax_d.set_xticklabels(c2c_names)
-    ax_d.set_ylabel('Distance (mm)'); ax_d.set_title('Cloud-to-cloud distance (GT→recon)')
-    ax_d.legend(fontsize=8); ax_d.grid(axis='y', alpha=0.3)
+    # ax_d = fig.add_subplot(gs[1, 2])
+    # c2c_keys = ['mean_c2c_m', 'median_c2c_m', 'p95_c2c_m']
+    # c2c_names = ['Mean', 'Median', 'P95']
+    # xd = np.arange(3)
+    # for i, lbl in enumerate(cloud_labels):
+    #     vals = [report['clouds'][lbl]['metrics'][k] * 1000 for k in c2c_keys]
+    #     offset = (i - len(cloud_labels) / 2 + 0.5) * bw
+    #     bars = ax_d.bar(xd + offset, vals, bw, label=lbl,
+    #                     color=bar_colors[i % len(bar_colors)])
+    #     _bar_labels(ax_d, bars, fmt='{:.0f}')
+    # ax_d.set_xticks(xd); ax_d.set_xticklabels(c2c_names)
+    # ax_d.set_ylabel('Distance (mm)'); ax_d.set_title('Cloud-to-cloud distance (GT→recon)')
+    # ax_d.legend(fontsize=8); ax_d.grid(axis='y', alpha=0.3)
 
     # ── Cleaning funnel (top-right) ─────────────────────────────────────────
-    ax_cl = fig.add_subplot(gs[0, 2])
-    funnel_lbl = cloud_labels[-1] if cloud_labels else None
-    if funnel_lbl:
-        step_keys = ['raw', 'after_bbox', 'after_ground_removal', 'after_sor', 'after_distance_gate']
-        step_names = ['Raw', 'Bbox crop', 'Ground\nremoval', 'SOR', 'Distance\ngate']
-        sc = report['clouds'][funnel_lbl].get('step_counts', {})
-        vals = [sc.get(k, 0) for k in step_keys]
-        colors_cl = plt.cm.Blues(np.linspace(0.4, 0.85, len(step_names)))
-        bars = ax_cl.barh(range(len(step_names)), vals, color=colors_cl)
-        ax_cl.set_yticks(range(len(step_names)))
-        ax_cl.set_yticklabels(step_names, fontsize=8)
-        ax_cl.set_xlabel('Point count')
-        ax_cl.set_title(f'Cleaning funnel  ({funnel_lbl})')
-        max_v = max(vals) if vals else 1
-        for j, v in enumerate(vals):
-            if v > 0:
-                ax_cl.text(v + max_v * 0.015, j, f'{v:,}',
-                           va='center', fontsize=7.5)
-        ax_cl.grid(axis='x', alpha=0.3)
+    # ax_cl = fig.add_subplot(gs[0, 2])
+    # funnel_lbl = cloud_labels[-1] if cloud_labels else None
+    # if funnel_lbl:
+    #     step_keys = ['raw', 'after_bbox', 'after_ground_removal', 'after_sor', 'after_distance_gate']
+    #     step_names = ['Raw', 'Bbox crop', 'Ground\nremoval', 'SOR', 'Distance\ngate']
+    #     sc = report['clouds'][funnel_lbl].get('step_counts', {})
+    #     vals = [sc.get(k, 0) for k in step_keys]
+    #     colors_cl = plt.cm.Blues(np.linspace(0.4, 0.85, len(step_names)))
+    #     bars = ax_cl.barh(range(len(step_names)), vals, color=colors_cl)
+    #     ax_cl.set_yticks(range(len(step_names)))
+    #     ax_cl.set_yticklabels(step_names, fontsize=8)
+    #     ax_cl.set_xlabel('Point count')
+    #     ax_cl.set_title(f'Cleaning funnel  ({funnel_lbl})')
+    #     max_v = max(vals) if vals else 1
+    #     for j, v in enumerate(vals):
+    #         if v > 0:
+    #             ax_cl.text(v + max_v * 0.015, j, f'{v:,}',
+    #                        va='center', fontsize=7.5)
+    #     ax_cl.grid(axis='x', alpha=0.3)
 
     # ── Sparse point count + KNN evolution (bottom, 2 cols) ────────────────
-    ax_sp = fig.add_subplot(gs[2, :2])
-    if sparse_metrics:
-        iters = [m['iter'] for m in sparse_metrics]
-        pts_c = [m['points'] for m in sparse_metrics]
-        ax_sp.plot(iters, pts_c, marker='o', color='#1E88E5', linewidth=2,
-                   label='Sparse points')
-        ax_sp.fill_between(iters, pts_c, alpha=0.12, color='#1E88E5')
-        for it, pc in zip(iters, pts_c):
-            ax_sp.text(it, pc + max(pts_c) * 0.02, f'{pc:,}',
-                       ha='center', fontsize=7, color='#1565C0')
-        ax_sp.set_xlabel('Iteration  (0 = seed only)')
-        ax_sp.set_ylabel('Sparse point count', color='#1565C0')
-        ax_sp.tick_params(axis='y', labelcolor='#1565C0')
-        ax_sp.set_title('Sparse reconstruction evolution')
-        ax_sp.set_xticks(iters)
-        ax_sp.grid(alpha=0.3)
-
-        knn_iters = [m['iter'] for m in sparse_metrics if m['knn_p95'] is not None]
-        knn_vals = [m['knn_p95'] for m in sparse_metrics if m['knn_p95'] is not None]
-        if knn_iters:
-            ax2 = ax_sp.twinx()
-            ax2.plot(knn_iters, knn_vals, marker='s', color='#E53935', linewidth=2,
-                     linestyle='--', label='KNN P95')
-            ax2.set_ylabel('KNN P95 dist (COLMAP units)', color='#E53935')
-            ax2.tick_params(axis='y', labelcolor='#E53935')
-            # Combine legends
-            h1, l1 = ax_sp.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            ax_sp.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
+    # ax_sp = fig.add_subplot(gs[2, :2])
+    # if sparse_metrics:
+    #     iters = [m['iter'] for m in sparse_metrics]
+    #     pts_c = [m['points'] for m in sparse_metrics]
+    #     ax_sp.plot(iters, pts_c, marker='o', color='#1E88E5', linewidth=2,
+    #                label='Sparse points')
+    #     ax_sp.fill_between(iters, pts_c, alpha=0.12, color='#1E88E5')
+    #     for it, pc in zip(iters, pts_c):
+    #         ax_sp.text(it, pc + max(pts_c) * 0.02, f'{pc:,}',
+    #                    ha='center', fontsize=7, color='#1565C0')
+    #     ax_sp.set_xlabel('Iteration  (0 = seed only)')
+    #     ax_sp.set_ylabel('Sparse point count', color='#1565C0')
+    #     ax_sp.tick_params(axis='y', labelcolor='#1565C0')
+    #     ax_sp.set_title('Sparse reconstruction evolution')
+    #     ax_sp.set_xticks(iters)
+    #     ax_sp.grid(alpha=0.3)
+    #
+    #     knn_iters = [m['iter'] for m in sparse_metrics if m['knn_p95'] is not None]
+    #     knn_vals = [m['knn_p95'] for m in sparse_metrics if m['knn_p95'] is not None]
+    #     if knn_iters:
+    #         ax2 = ax_sp.twinx()
+    #         ax2.plot(knn_iters, knn_vals, marker='s', color='#E53935', linewidth=2,
+    #                  linestyle='--', label='KNN P95')
+    #         ax2.set_ylabel('KNN P95 dist (COLMAP units)', color='#E53935')
+    #         ax2.tick_params(axis='y', labelcolor='#E53935')
+    #         h1, l1 = ax_sp.get_legend_handles_labels()
+    #         h2, l2 = ax2.get_legend_handles_labels()
+    #         ax_sp.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
 
     # ── Score breakdown (bottom-right) ─────────────────────────────────────
-    ax_sc = fig.add_subplot(gs[2, 2])
-    if score_evolution:
-        sc_x = [s['iter'] + 1 for s in score_evolution]
-        finals = [s['final_score'] for s in score_evolution]
-
-        # Stacked bars: positive weighted terms (covisibility, novelty)
-        #               negative weighted terms (movement_cost, angular_penalty) from 0 down
-        pos_terms = [('covisibility', '#1E88E5'), ('novelty', '#43A047')]
-        neg_terms = [('movement_cost', '#FB8C00'), ('angular_separation_penalty', '#E53935')]
-        bottom_pos = np.zeros(len(score_evolution))
-        bottom_neg = np.zeros(len(score_evolution))
-
-        for term, color in pos_terms:
-            vals_w = np.array([
-                s['terms'].get(term, 0) * s['weights'].get(term, 1.0)
-                for s in score_evolution
-            ])
-            ax_sc.bar(sc_x, vals_w, bottom=bottom_pos, color=color, alpha=0.75,
-                      label=f'+{term}', width=0.4, zorder=3)
-            bottom_pos += vals_w
-
-        for term, color in neg_terms:
-            vals_w = np.array([
-                -(s['terms'].get(term, 0) * s['weights'].get(term, 0.0))
-                for s in score_evolution
-            ])
-            ax_sc.bar(sc_x, vals_w, bottom=bottom_neg, color=color, alpha=0.75,
-                      label=f'−{term}', width=0.4, zorder=3)
-            bottom_neg += vals_w
-
-        ax_sc.plot(sc_x, finals, marker='D', color='black', linewidth=1.5,
-                   zorder=5, label='Final score', markersize=6)
-        ax_sc.axhline(0, color='black', linewidth=0.5)
-        ax_sc.set_xlabel('NBV iteration')
-        ax_sc.set_ylabel('Score')
-        ax_sc.set_title('Selected candidate score breakdown')
-        ax_sc.set_xticks(sc_x)
-        ax_sc.legend(fontsize=6.5, loc='upper right', ncol=1)
-        ax_sc.grid(axis='y', alpha=0.3, zorder=0)
+    # ax_sc = fig.add_subplot(gs[2, 2])
+    # if score_evolution:
+    #     sc_x = [s['iter'] + 1 for s in score_evolution]
+    #     finals = [s['final_score'] for s in score_evolution]
+    #     pos_terms = [('covisibility', '#1E88E5'), ('novelty', '#43A047')]
+    #     neg_terms = [('movement_cost', '#FB8C00'), ('angular_separation_penalty', '#E53935')]
+    #     bottom_pos = np.zeros(len(score_evolution))
+    #     bottom_neg = np.zeros(len(score_evolution))
+    #     for term, color in pos_terms:
+    #         vals_w = np.array([
+    #             s['terms'].get(term, 0) * s['weights'].get(term, 1.0)
+    #             for s in score_evolution
+    #         ])
+    #         ax_sc.bar(sc_x, vals_w, bottom=bottom_pos, color=color, alpha=0.75,
+    #                   label=f'+{term}', width=0.4, zorder=3)
+    #         bottom_pos += vals_w
+    #     for term, color in neg_terms:
+    #         vals_w = np.array([
+    #             -(s['terms'].get(term, 0) * s['weights'].get(term, 0.0))
+    #             for s in score_evolution
+    #         ])
+    #         ax_sc.bar(sc_x, vals_w, bottom=bottom_neg, color=color, alpha=0.75,
+    #                   label=f'−{term}', width=0.4, zorder=3)
+    #         bottom_neg += vals_w
+    #     ax_sc.plot(sc_x, finals, marker='D', color='black', linewidth=1.5,
+    #                zorder=5, label='Final score', markersize=6)
+    #     ax_sc.axhline(0, color='black', linewidth=0.5)
+    #     ax_sc.set_xlabel('NBV iteration')
+    #     ax_sc.set_ylabel('Score')
+    #     ax_sc.set_title('Selected candidate score breakdown')
+    #     ax_sc.set_xticks(sc_x)
+    #     ax_sc.legend(fontsize=6.5, loc='upper right', ncol=1)
+    #     ax_sc.grid(axis='y', alpha=0.3, zorder=0)
 
     # ── Mission params footer ───────────────────────────────────────────────
     mp = report.get('mission_params', {})
@@ -661,11 +652,12 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
             f"seed: {mp.get('seed_count', sm_info.get('ring_image_count', '?'))} imgs",
             f"radius: {sm_info.get('capture_radius_m', '?')} m",
         ]
-        fig.text(0.5, 0.002, '   |   '.join(parts), ha='center', va='bottom',
+        fig.text(0.5, -0.04, '   |   '.join(parts), ha='center', va='bottom',
                  fontsize=8, color='#444', style='italic',
                  bbox=dict(boxstyle='round,pad=0.3', facecolor='#F5F5F5',
                            edgecolor='#ccc', alpha=0.9))
 
+    fig.tight_layout()
     out = output_dir / 'metrics.png'
     fig.savefig(out, dpi=150, bbox_inches='tight')
     print(f'  Saved → {out}')
