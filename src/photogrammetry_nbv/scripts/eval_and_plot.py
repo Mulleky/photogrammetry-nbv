@@ -3,32 +3,37 @@
 eval_and_plot.py — Full evaluation + visualization for a photogrammetry-covisibility NBV run.
 
 Auto-discovers all files from the run directory. Runs alignment, cleaning, and
-quality metrics inline, then saves two figures:
+quality metrics inline, then saves three figures:
 
-  Figure 1 — Reconstruction quality metrics (F-score, completeness, accuracy,
-              C2C distances, cleaning funnel, sparse evolution, score breakdown)
-  Figure 2 — 3D drone trajectory: seed spline, NBV views, candidate hemisphere,
-              rock centre (gold star), and aligned reconstruction cloud
+  Window 1 / Figure 1 — 3D drone trajectory: seed spline, NBV views, candidate
+                        hemisphere, rock centre, and aligned reconstruction cloud
+  Window 2 / Figure 2 — Reconstruction quality metrics:
+                        F-score, completeness, accuracy
+  Window 3 / Figure 3 — Diagnostics:
+                        cloud-to-cloud distance, sparse reconstruction evolution
 
 Usage:
-    python3 eval_and_plot.py \\
-        --run-dir ~/photogrammetry_NBV/data/photogrammetry/unified_run_YYYYMMDD_HHMMSS \\
-        --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/\\
-meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj
+    python3 eval_and_plot.py \
+        --run-dir ~/photogrammetry_NBV/data/photogrammetry/unified_run_YYYYMMDD_HHMMSS \
+        --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj
 
     # Optional: override rock centre, bbox, thresholds, etc.
     python3 eval_and_plot.py --help
 
-    # Skip interactive window (e.g. on a headless server):
+    # Skip interactive windows (e.g. on a headless server):
     python3 eval_and_plot.py ... --no-show
 
-Output written to <run-dir>/eval/  (report.json + metrics.png + trajectory_3d.png).
+Output written to <run-dir>/eval/:
+    report.json
+    trajectory_3d.png
+    metrics.png
+    diagnostics.png
 """
 from __future__ import annotations
 
 # ── backend must be set before pyplot is imported ──────────────────────────────
-import sys as _sys
-if '--no-show' in _sys.argv:
+import sys
+if '--no-show' in sys.argv:
     import matplotlib as _mpl
     _mpl.use('Agg')
 
@@ -38,11 +43,8 @@ import struct
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D        # noqa: F401  (kept for legend handles)
-from matplotlib.patches import Patch       # noqa: F401
 from mpl_toolkits.mplot3d import Axes3D   # noqa: F401  (registers 3d projection)
 from scipy.interpolate import splev, splprep
 from scipy.spatial import KDTree
@@ -55,9 +57,9 @@ from scipy.spatial import KDTree
 def _qvec_to_R(q: np.ndarray) -> np.ndarray:
     w, x, y, z = q
     return np.array([
-        [1-2*y*y-2*z*z,  2*x*y-2*w*z,    2*x*z+2*w*y],
-        [2*x*y+2*w*z,    1-2*x*x-2*z*z,  2*y*z-2*w*x],
-        [2*x*z-2*w*y,    2*y*z+2*w*x,    1-2*x*x-2*y*y],
+        [1 - 2*y*y - 2*z*z,  2*x*y - 2*w*z,    2*x*z + 2*w*y],
+        [2*x*y + 2*w*z,      1 - 2*x*x - 2*z*z,  2*y*z - 2*w*x],
+        [2*x*z - 2*w*y,      2*y*z + 2*w*x,    1 - 2*x*x - 2*y*y],
     ])
 
 
@@ -67,10 +69,10 @@ def read_images_bin(path: Path) -> Dict[str, np.ndarray]:
     with open(path, 'rb') as f:
         n = struct.unpack('<Q', f.read(8))[0]
         for _ in range(n):
-            struct.unpack('<I', f.read(4))                        # image_id
+            struct.unpack('<I', f.read(4))  # image_id
             qvec = np.array(struct.unpack('<4d', f.read(32)))
             tvec = np.array(struct.unpack('<3d', f.read(24)))
-            struct.unpack('<I', f.read(4))                        # camera_id
+            struct.unpack('<I', f.read(4))  # camera_id
             name = b''
             while True:
                 ch = f.read(1)
@@ -97,11 +99,13 @@ def _ply_props(header_lines: List[str]) -> Tuple[List[Tuple[str, str]], str, int
         if line.startswith('format'):
             fmt = line.split()[1]
         elif line.startswith('element vertex'):
-            vertex_count = int(line.split()[-1]); in_v = True
+            vertex_count = int(line.split()[-1])
+            in_v = True
         elif line.startswith('element') and in_v:
             in_v = False
         elif in_v and line.startswith('property'):
-            p = line.split(); props.append((p[1], p[2]))
+            p = line.split()
+            props.append((p[1], p[2]))
     return props, fmt, vertex_count
 
 
@@ -123,13 +127,17 @@ def read_ply_xyz(path: Path) -> np.ndarray:
             p = rows[i].split()
             pts[i] = [float(p[xi]), float(p[yi]), float(p[zi])]
         return pts
-    _dmap = {'float': 'f4', 'double': 'f8', 'uchar': 'u1', 'int': 'i4',
-              'uint': 'u4', 'short': 'i2', 'ushort': 'u2'}
+    _dmap = {
+        'float': 'f4', 'double': 'f8', 'uchar': 'u1', 'int': 'i4',
+        'uint': 'u4', 'short': 'i2', 'ushort': 'u2'
+    }
     dt = np.dtype([(nm, '<' + _dmap.get(tp, 'f4')) for tp, nm in props])
     data = np.frombuffer(body[:n * dt.itemsize], dtype=dt)
-    return np.column_stack([data['x'].astype(np.float64),
-                             data['y'].astype(np.float64),
-                             data['z'].astype(np.float64)])
+    return np.column_stack([
+        data['x'].astype(np.float64),
+        data['y'].astype(np.float64),
+        data['z'].astype(np.float64),
+    ])
 
 
 def write_ply_xyz(path: Path, pts: np.ndarray) -> None:
@@ -164,8 +172,12 @@ def load_obj_mesh(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     return np.array(verts, dtype=np.float64), np.array(faces, dtype=np.int64)
 
 
-def sample_mesh_uniformly(verts: np.ndarray, faces: np.ndarray,
-                           n: int, rng: np.random.Generator) -> np.ndarray:
+def sample_mesh_uniformly(
+    verts: np.ndarray,
+    faces: np.ndarray,
+    n: int,
+    rng: np.random.Generator
+) -> np.ndarray:
     v0, v1, v2 = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
     areas = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
     total = areas.sum()
@@ -175,9 +187,11 @@ def sample_mesh_uniformly(verts: np.ndarray, faces: np.ndarray,
     r1, r2 = rng.random(n), rng.random(n)
     sr1 = np.sqrt(r1)
     u, v, w = 1 - sr1, sr1 * (1 - r2), sr1 * r2
-    return (u[:, None] * verts[faces[fi, 0]]
-            + v[:, None] * verts[faces[fi, 1]]
-            + w[:, None] * verts[faces[fi, 2]]).astype(np.float64)
+    return (
+        u[:, None] * verts[faces[fi, 0]]
+        + v[:, None] * verts[faces[fi, 1]]
+        + w[:, None] * verts[faces[fi, 2]]
+    ).astype(np.float64)
 
 
 def apply_T(pts: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -224,7 +238,7 @@ def align_cloud(
     bbox_center: np.ndarray,
     bbox_half: float,
 ) -> Tuple[np.ndarray, Dict]:
-    """Align a COLMAP cloud to NED via Umeyama.  Returns (pts_ned, info)."""
+    """Align a COLMAP cloud to NED via Umeyama. Returns (pts_ned, info)."""
     colmap_centres = read_images_bin(images_bin)
     ned_positions = _load_ned_positions([d for d in meta_dirs if d.exists()])
 
@@ -236,7 +250,8 @@ def align_cloud(
 
     if len(src) < 3:
         raise RuntimeError(
-            f'Only {len(src)} matched cameras in {images_bin} — need ≥3')
+            f'Only {len(src)} matched cameras in {images_bin} — need ≥3'
+        )
 
     src_a, dst_a = np.array(src), np.array(dst)
     s, R, t = umeyama(src_a, dst_a)
@@ -267,8 +282,13 @@ def _crop_bbox(pts: np.ndarray, center: np.ndarray, half: float) -> np.ndarray:
     return pts[np.all(np.abs(pts - center) <= half, axis=1)]
 
 
-def _remove_ground(pts: np.ndarray, thresh: float, n_iter: int,
-                    low_frac: float, rng: np.random.Generator) -> np.ndarray:
+def _remove_ground(
+    pts: np.ndarray,
+    thresh: float,
+    n_iter: int,
+    low_frac: float,
+    rng: np.random.Generator
+) -> np.ndarray:
     if len(pts) < 10:
         return pts
     z_thresh = np.percentile(pts[:, 2], (1 - low_frac) * 100)
@@ -309,10 +329,18 @@ def _dist_gate(pts: np.ndarray, gt: np.ndarray, gate: float) -> np.ndarray:
     return pts[d <= gate]
 
 
-def clean_cloud(pts: np.ndarray, gt_samples: np.ndarray, rock: np.ndarray,
-                crop_half: float, ground_thresh: float, n_ransac: int,
-                sor_k: int, sor_std: float, gate: float,
-                rng: np.random.Generator) -> Tuple[np.ndarray, Dict[str, int]]:
+def clean_cloud(
+    pts: np.ndarray,
+    gt_samples: np.ndarray,
+    rock: np.ndarray,
+    crop_half: float,
+    ground_thresh: float,
+    n_ransac: int,
+    sor_k: int,
+    sor_std: float,
+    gate: float,
+    rng: np.random.Generator
+) -> Tuple[np.ndarray, Dict[str, int]]:
     steps: Dict[str, int] = {'raw': len(pts)}
     pts = _crop_bbox(pts, rock, crop_half)
     steps['after_bbox'] = len(pts)
@@ -329,15 +357,24 @@ def clean_cloud(pts: np.ndarray, gt_samples: np.ndarray, rock: np.ndarray,
 # §6  Metrics
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_metrics(gt_samples: np.ndarray, recon: np.ndarray,
-                    thresholds: List[float]) -> Dict:
+def compute_metrics(
+    gt_samples: np.ndarray,
+    recon: np.ndarray,
+    thresholds: List[float]
+) -> Dict:
     if len(recon) == 0:
-        empty = {f'{m}_{t*1000:.0f}mm': 0.0
-                 for m in ('completeness', 'accuracy', 'fscore')
-                 for t in thresholds}
-        empty.update(mean_c2c_m=float('inf'), median_c2c_m=float('inf'),
-                     p95_c2c_m=float('inf'))
+        empty = {
+            f'{m}_{t*1000:.0f}mm': 0.0
+            for m in ('completeness', 'accuracy', 'fscore')
+            for t in thresholds
+        }
+        empty.update(
+            mean_c2c_m=float('inf'),
+            median_c2c_m=float('inf'),
+            p95_c2c_m=float('inf')
+        )
         return empty
+
     gt2r, _ = KDTree(recon).query(gt_samples, k=1)
     r2gt, _ = KDTree(gt_samples).query(recon, k=1)
     out: Dict = {}
@@ -349,6 +386,7 @@ def compute_metrics(gt_samples: np.ndarray, recon: np.ndarray,
         out[f'completeness_{key}'] = round(c * 100, 3)
         out[f'accuracy_{key}'] = round(a * 100, 3)
         out[f'fscore_{key}'] = round(f * 100, 3)
+
     out['mean_c2c_m'] = float(gt2r.mean())
     out['median_c2c_m'] = float(np.median(gt2r))
     out['p95_c2c_m'] = float(np.percentile(gt2r, 95))
@@ -458,11 +496,9 @@ def load_score_evolution(run_dir: Path) -> List[Dict]:
 
 
 def _find_seed_images_bin(run_dir: Path) -> Optional[Path]:
-    # Bootstrap snapshot (preferred): single connected model with correct scale
     snapshot_ib = run_dir / 'colmap' / 'seed_sparse_snapshot' / 'images.bin'
     if snapshot_ib.exists():
         return snapshot_ib
-    # Fallback: standalone seed_colmap sub-models (may be fragmented)
     for sub in ('0', '1', '2'):
         p = run_dir / 'seed_colmap' / 'sparse' / sub / 'images.bin'
         if p.exists():
@@ -484,25 +520,59 @@ def _pt_enu(p: np.ndarray) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §9  Figure 1 — quality metrics
+# §9  Plot styling helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _C_SEED = '#546E7A'
 _C_NBV = '#00ACC1'
-_PALETTE = ['#1E88E5', '#43A047', '#FB8C00', '#8E24AA', '#E53935']
+_C_SEED_3D = '#1565C0'
+_C_NBV_3D = '#E65100'
+_C_CAND = '#BDBDBD'
+_C_CLOUD = '#64B5F6'
+_C_ROCK = 'gold'
 
 
 def _bar_labels(ax, bars, fmt='{:.1f}'):
     for b in bars:
         h = b.get_height()
         if h > 1.5:
-            ax.text(b.get_x() + b.get_width() / 2, h + 0.8,
-                    fmt.format(h), ha='center', va='bottom', fontsize=6.5)
+            ax.text(
+                b.get_x() + b.get_width() / 2,
+                h + 0.8,
+                fmt.format(h),
+                ha='center',
+                va='bottom',
+                fontsize=6.5
+            )
 
 
-def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
-                         score_evolution: List[Dict],
-                         output_dir: Path) -> plt.Figure:
+def _add_mission_footer(fig: plt.Figure, report: Dict, y: float = 0.02) -> None:
+    mp = report.get('mission_params', {})
+    if not mp:
+        return
+    sm_info = mp.get('seed_manifest', {})
+    parts = [
+        f"scorer: {mp.get('scorer_name', '?')}",
+        f"stop: {mp.get('stopping_criterion', '?')}",
+        f"knn_thresh: {mp.get('knn_distance_threshold', '?')}",
+        f"budget: {mp.get('image_budget', '?')} / {mp.get('max_image_budget', '?')}",
+        f"seed: {mp.get('seed_count', sm_info.get('ring_image_count', '?'))} imgs",
+        f"radius: {sm_info.get('capture_radius_m', '?')} m",
+    ]
+    fig.text(
+        0.5, y, '   |   '.join(parts),
+        ha='center', va='bottom',
+        fontsize=8, color='#444', style='italic',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor='#F5F5F5',
+                  edgecolor='#ccc', alpha=0.9)
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# §10  Window 2 — quality metrics
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def plot_metrics_figure(report: Dict, output_dir: Path) -> plt.Figure:
     thresholds = report['thresholds_m']
     t_labels = [f'{t * 1000:.0f}mm' for t in thresholds]
     cloud_labels = [k for k in report['clouds'] if 'metrics' in report['clouds'][k]]
@@ -511,158 +581,67 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
     x = np.arange(len(t_labels))
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle('Reconstruction Quality Evaluation', fontsize=14,
-                 fontweight='bold', y=1.02)
+    fig.canvas.manager.set_window_title('Window 2 - Quality Metrics')
+    fig.suptitle('Reconstruction Quality Evaluation', fontsize=14, fontweight='bold')
 
     ax_f, ax_c, ax_a = axes
+
+    if not cloud_labels:
+        for ax in axes:
+            ax.axis('off')
+            ax.text(0.5, 0.5, 'No valid clouds with metrics found',
+                    ha='center', va='center', fontsize=11)
+        out = output_dir / 'metrics.png'
+        fig.savefig(out, dpi=150, bbox_inches='tight')
+        print(f'  Saved → {out}')
+        return fig
 
     # ── F-score ─────────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'fscore_{tl}'] for tl in t_labels]
         offset = (i - len(cloud_labels) / 2 + 0.5) * bw
-        bars = ax_f.bar(x + offset, vals, bw, label=lbl,
-                        color=bar_colors[i % len(bar_colors)], zorder=3)
+        bars = ax_f.bar(
+            x + offset, vals, bw, label=lbl,
+            color=bar_colors[i % len(bar_colors)], zorder=3
+        )
         _bar_labels(ax_f, bars)
-    ax_f.set_xticks(x); ax_f.set_xticklabels(t_labels)
-    ax_f.set_ylabel('F-score (%)'); ax_f.set_title('F-score at distance thresholds')
-    ax_f.set_ylim(0, 108); ax_f.legend(fontsize=9)
+    ax_f.set_xticks(x)
+    ax_f.set_xticklabels(t_labels)
+    ax_f.set_ylabel('F-score (%)')
+    ax_f.set_title('F-score at distance thresholds')
+    ax_f.set_ylim(0, 108)
+    ax_f.legend(fontsize=9)
     ax_f.grid(axis='y', alpha=0.35, zorder=0)
 
-    # ── Completeness ─────────────────────────────────────────────────────────
+    # ── Completeness ────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'completeness_{tl}'] for tl in t_labels]
-        ax_c.plot(t_labels, vals, marker='o', label=lbl,
-                  color=bar_colors[i % len(bar_colors)], linewidth=2)
-    ax_c.set_ylabel('Completeness (%)'); ax_c.set_title('Completeness')
-    ax_c.set_ylim(0, 108); ax_c.legend(fontsize=8); ax_c.grid(alpha=0.3)
+        ax_c.plot(
+            t_labels, vals, marker='o', label=lbl,
+            color=bar_colors[i % len(bar_colors)], linewidth=2
+        )
+    ax_c.set_ylabel('Completeness (%)')
+    ax_c.set_title('Completeness')
+    ax_c.set_ylim(0, 108)
+    ax_c.legend(fontsize=8)
+    ax_c.grid(alpha=0.3)
 
-    # ── Accuracy ─────────────────────────────────────────────────────────────
+    # ── Accuracy ────────────────────────────────────────────────────────────
     for i, lbl in enumerate(cloud_labels):
         vals = [report['clouds'][lbl]['metrics'][f'accuracy_{tl}'] for tl in t_labels]
-        ax_a.plot(t_labels, vals, marker='s', label=lbl,
-                  color=bar_colors[i % len(bar_colors)], linewidth=2)
-    ax_a.set_ylabel('Accuracy (%)'); ax_a.set_title('Accuracy')
-    ax_a.set_ylim(0, 108); ax_a.legend(fontsize=8); ax_a.grid(alpha=0.3)
+        ax_a.plot(
+            t_labels, vals, marker='s', label=lbl,
+            color=bar_colors[i % len(bar_colors)], linewidth=2
+        )
+    ax_a.set_ylabel('Accuracy (%)')
+    ax_a.set_title('Accuracy')
+    ax_a.set_ylim(0, 108)
+    ax_a.legend(fontsize=8)
+    ax_a.grid(alpha=0.3)
 
-    # ── C2C distances (mid-right) ───────────────────────────────────────────
-    # ax_d = fig.add_subplot(gs[1, 2])
-    # c2c_keys = ['mean_c2c_m', 'median_c2c_m', 'p95_c2c_m']
-    # c2c_names = ['Mean', 'Median', 'P95']
-    # xd = np.arange(3)
-    # for i, lbl in enumerate(cloud_labels):
-    #     vals = [report['clouds'][lbl]['metrics'][k] * 1000 for k in c2c_keys]
-    #     offset = (i - len(cloud_labels) / 2 + 0.5) * bw
-    #     bars = ax_d.bar(xd + offset, vals, bw, label=lbl,
-    #                     color=bar_colors[i % len(bar_colors)])
-    #     _bar_labels(ax_d, bars, fmt='{:.0f}')
-    # ax_d.set_xticks(xd); ax_d.set_xticklabels(c2c_names)
-    # ax_d.set_ylabel('Distance (mm)'); ax_d.set_title('Cloud-to-cloud distance (GT→recon)')
-    # ax_d.legend(fontsize=8); ax_d.grid(axis='y', alpha=0.3)
+    _add_mission_footer(fig, report, y=0.01)
+    fig.tight_layout(rect=[0, 0.07, 1, 0.95])
 
-    # ── Cleaning funnel (top-right) ─────────────────────────────────────────
-    # ax_cl = fig.add_subplot(gs[0, 2])
-    # funnel_lbl = cloud_labels[-1] if cloud_labels else None
-    # if funnel_lbl:
-    #     step_keys = ['raw', 'after_bbox', 'after_ground_removal', 'after_sor', 'after_distance_gate']
-    #     step_names = ['Raw', 'Bbox crop', 'Ground\nremoval', 'SOR', 'Distance\ngate']
-    #     sc = report['clouds'][funnel_lbl].get('step_counts', {})
-    #     vals = [sc.get(k, 0) for k in step_keys]
-    #     colors_cl = plt.cm.Blues(np.linspace(0.4, 0.85, len(step_names)))
-    #     bars = ax_cl.barh(range(len(step_names)), vals, color=colors_cl)
-    #     ax_cl.set_yticks(range(len(step_names)))
-    #     ax_cl.set_yticklabels(step_names, fontsize=8)
-    #     ax_cl.set_xlabel('Point count')
-    #     ax_cl.set_title(f'Cleaning funnel  ({funnel_lbl})')
-    #     max_v = max(vals) if vals else 1
-    #     for j, v in enumerate(vals):
-    #         if v > 0:
-    #             ax_cl.text(v + max_v * 0.015, j, f'{v:,}',
-    #                        va='center', fontsize=7.5)
-    #     ax_cl.grid(axis='x', alpha=0.3)
-
-    # ── Sparse point count + KNN evolution (bottom, 2 cols) ────────────────
-    # ax_sp = fig.add_subplot(gs[2, :2])
-    # if sparse_metrics:
-    #     iters = [m['iter'] for m in sparse_metrics]
-    #     pts_c = [m['points'] for m in sparse_metrics]
-    #     ax_sp.plot(iters, pts_c, marker='o', color='#1E88E5', linewidth=2,
-    #                label='Sparse points')
-    #     ax_sp.fill_between(iters, pts_c, alpha=0.12, color='#1E88E5')
-    #     for it, pc in zip(iters, pts_c):
-    #         ax_sp.text(it, pc + max(pts_c) * 0.02, f'{pc:,}',
-    #                    ha='center', fontsize=7, color='#1565C0')
-    #     ax_sp.set_xlabel('Iteration  (0 = seed only)')
-    #     ax_sp.set_ylabel('Sparse point count', color='#1565C0')
-    #     ax_sp.tick_params(axis='y', labelcolor='#1565C0')
-    #     ax_sp.set_title('Sparse reconstruction evolution')
-    #     ax_sp.set_xticks(iters)
-    #     ax_sp.grid(alpha=0.3)
-    #
-    #     knn_iters = [m['iter'] for m in sparse_metrics if m['knn_p95'] is not None]
-    #     knn_vals = [m['knn_p95'] for m in sparse_metrics if m['knn_p95'] is not None]
-    #     if knn_iters:
-    #         ax2 = ax_sp.twinx()
-    #         ax2.plot(knn_iters, knn_vals, marker='s', color='#E53935', linewidth=2,
-    #                  linestyle='--', label='KNN P95')
-    #         ax2.set_ylabel('KNN P95 dist (COLMAP units)', color='#E53935')
-    #         ax2.tick_params(axis='y', labelcolor='#E53935')
-    #         h1, l1 = ax_sp.get_legend_handles_labels()
-    #         h2, l2 = ax2.get_legend_handles_labels()
-    #         ax_sp.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
-
-    # ── Score breakdown (bottom-right) ─────────────────────────────────────
-    # ax_sc = fig.add_subplot(gs[2, 2])
-    # if score_evolution:
-    #     sc_x = [s['iter'] + 1 for s in score_evolution]
-    #     finals = [s['final_score'] for s in score_evolution]
-    #     pos_terms = [('covisibility', '#1E88E5'), ('novelty', '#43A047')]
-    #     neg_terms = [('movement_cost', '#FB8C00'), ('angular_separation_penalty', '#E53935')]
-    #     bottom_pos = np.zeros(len(score_evolution))
-    #     bottom_neg = np.zeros(len(score_evolution))
-    #     for term, color in pos_terms:
-    #         vals_w = np.array([
-    #             s['terms'].get(term, 0) * s['weights'].get(term, 1.0)
-    #             for s in score_evolution
-    #         ])
-    #         ax_sc.bar(sc_x, vals_w, bottom=bottom_pos, color=color, alpha=0.75,
-    #                   label=f'+{term}', width=0.4, zorder=3)
-    #         bottom_pos += vals_w
-    #     for term, color in neg_terms:
-    #         vals_w = np.array([
-    #             -(s['terms'].get(term, 0) * s['weights'].get(term, 0.0))
-    #             for s in score_evolution
-    #         ])
-    #         ax_sc.bar(sc_x, vals_w, bottom=bottom_neg, color=color, alpha=0.75,
-    #                   label=f'−{term}', width=0.4, zorder=3)
-    #         bottom_neg += vals_w
-    #     ax_sc.plot(sc_x, finals, marker='D', color='black', linewidth=1.5,
-    #                zorder=5, label='Final score', markersize=6)
-    #     ax_sc.axhline(0, color='black', linewidth=0.5)
-    #     ax_sc.set_xlabel('NBV iteration')
-    #     ax_sc.set_ylabel('Score')
-    #     ax_sc.set_title('Selected candidate score breakdown')
-    #     ax_sc.set_xticks(sc_x)
-    #     ax_sc.legend(fontsize=6.5, loc='upper right', ncol=1)
-    #     ax_sc.grid(axis='y', alpha=0.3, zorder=0)
-
-    # ── Mission params footer ───────────────────────────────────────────────
-    mp = report.get('mission_params', {})
-    if mp:
-        sm_info = mp.get('seed_manifest', {})
-        parts = [
-            f"scorer: {mp.get('scorer_name', '?')}",
-            f"stop: {mp.get('stopping_criterion', '?')}",
-            f"knn_thresh: {mp.get('knn_distance_threshold', '?')}",
-            f"budget: {mp.get('image_budget', '?')} / {mp.get('max_image_budget', '?')}",
-            f"seed: {mp.get('seed_count', sm_info.get('ring_image_count', '?'))} imgs",
-            f"radius: {sm_info.get('capture_radius_m', '?')} m",
-        ]
-        fig.text(0.5, -0.04, '   |   '.join(parts), ha='center', va='bottom',
-                 fontsize=8, color='#444', style='italic',
-                 bbox=dict(boxstyle='round,pad=0.3', facecolor='#F5F5F5',
-                           edgecolor='#ccc', alpha=0.9))
-
-    fig.tight_layout()
     out = output_dir / 'metrics.png'
     fig.savefig(out, dpi=150, bbox_inches='tight')
     print(f'  Saved → {out}')
@@ -670,15 +649,135 @@ def plot_metrics_figure(report: Dict, sparse_metrics: List[Dict],
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §10  Figure 2 — 3-D trajectory / candidate hemisphere
+# §11  Window 3 — diagnostics
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_C_SEED_3D = '#1565C0'
-_C_NBV_3D = '#E65100'
-_C_CAND = '#BDBDBD'
-_C_CLOUD = '#64B5F6'
-_C_ROCK = 'gold'
+def plot_diagnostics_figure(
+    report: Dict,
+    sparse_metrics: List[Dict],
+    output_dir: Path
+) -> plt.Figure:
+    cloud_labels = [k for k in report['clouds'] if 'metrics' in report['clouds'][k]]
+    bar_colors = [_C_SEED, _C_NBV]
+    bw = 0.35
 
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
+    fig.canvas.manager.set_window_title('Window 3 - Diagnostics')
+    fig.suptitle('Reconstruction Diagnostics', fontsize=14, fontweight='bold')
+
+    ax_d, ax_sp, ax_cl = axes
+
+    # ── Cloud-to-cloud distance ─────────────────────────────────────────────
+    if cloud_labels:
+        c2c_keys = ['mean_c2c_m', 'median_c2c_m', 'p95_c2c_m']
+        c2c_names = ['Mean', 'Median', 'P95']
+        xd = np.arange(len(c2c_keys))
+        for i, lbl in enumerate(cloud_labels):
+            vals = [report['clouds'][lbl]['metrics'][k] * 1000 for k in c2c_keys]
+            offset = (i - len(cloud_labels) / 2 + 0.5) * bw
+            bars = ax_d.bar(
+                xd + offset, vals, bw, label=lbl,
+                color=bar_colors[i % len(bar_colors)], zorder=3
+            )
+            _bar_labels(ax_d, bars, fmt='{:.0f}')
+        ax_d.set_xticks(xd)
+        ax_d.set_xticklabels(c2c_names)
+        ax_d.set_ylabel('Distance (mm)')
+        ax_d.set_title('Cloud-to-cloud distance (GT→recon)')
+        ax_d.legend(fontsize=8)
+        ax_d.grid(axis='y', alpha=0.3, zorder=0)
+    else:
+        ax_d.axis('off')
+        ax_d.text(0.5, 0.5, 'No C2C data available',
+                  ha='center', va='center', fontsize=11)
+
+    # ── Sparse reconstruction evolution ─────────────────────────────────────
+    if sparse_metrics:
+        iters = [m['iter'] for m in sparse_metrics]
+        pts_c = [m['points'] for m in sparse_metrics]
+
+        ax_sp.plot(
+            iters, pts_c, marker='o', color='#1E88E5', linewidth=2,
+            label='Sparse points'
+        )
+        ax_sp.fill_between(iters, pts_c, alpha=0.12, color='#1E88E5')
+
+        ymax = max(pts_c) if pts_c else 1
+        for it, pc in zip(iters, pts_c):
+            ax_sp.text(
+                it, pc + ymax * 0.02, f'{pc:,}',
+                ha='center', fontsize=7, color='#1565C0'
+            )
+
+        ax_sp.set_xlabel('Iteration (0 = seed only)')
+        ax_sp.set_ylabel('Sparse point count', color='#1565C0')
+        ax_sp.tick_params(axis='y', labelcolor='#1565C0')
+        ax_sp.set_title('Sparse reconstruction evolution')
+        ax_sp.set_xticks(iters)
+        ax_sp.grid(alpha=0.3)
+
+        knn_iters = [m['iter'] for m in sparse_metrics if m['knn_p95'] is not None]
+        knn_vals = [m['knn_p95'] for m in sparse_metrics if m['knn_p95'] is not None]
+        if knn_iters:
+            ax2 = ax_sp.twinx()
+            ax2.plot(
+                knn_iters, knn_vals, marker='s', color='#E53935',
+                linewidth=2, linestyle='--', label='KNN P95'
+            )
+            ax2.set_ylabel('KNN P95 dist (COLMAP units)', color='#E53935')
+            ax2.tick_params(axis='y', labelcolor='#E53935')
+            h1, l1 = ax_sp.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            ax_sp.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
+        else:
+            ax_sp.legend(fontsize=8, loc='upper left')
+    else:
+        ax_sp.axis('off')
+        ax_sp.text(0.5, 0.5, 'No sparse evolution data available',
+                   ha='center', va='center', fontsize=11)
+
+    # ── Cleaning funnel ─────────────────────────────────────────────────────
+    ax_cl.axis('off')
+
+    # funnel_lbl = 'nbv' if 'nbv' in report['clouds'] else (cloud_labels[-1] if cloud_labels else None)
+    # if funnel_lbl and funnel_lbl in report['clouds']:
+    #     step_keys = ['raw', 'after_bbox', 'after_ground_removal', 'after_sor', 'after_distance_gate']
+    #     step_names = ['Raw', 'Bbox crop', 'Ground\nremoval', 'SOR', 'Distance\ngate']
+    #     sc = report['clouds'][funnel_lbl].get('step_counts', {})
+    #     vals = [sc.get(k, 0) for k in step_keys]
+    #
+    #     colors_cl = plt.cm.Blues(np.linspace(0.4, 0.85, len(step_names)))
+    #     ax_cl.barh(range(len(step_names)), vals, color=colors_cl)
+    #     ax_cl.set_yticks(range(len(step_names)))
+    #     ax_cl.set_yticklabels(step_names, fontsize=8)
+    #     ax_cl.set_xlabel('Point count')
+    #     ax_cl.set_title(f'Cleaning funnel ({funnel_lbl})')
+    #
+    #     max_v = max(vals) if vals else 1
+    #     for j, v in enumerate(vals):
+    #         if v > 0:
+    #             ax_cl.text(
+    #                 v + max_v * 0.015, j, f'{v:,}',
+    #                 va='center', fontsize=7.5
+    #             )
+    #     ax_cl.grid(axis='x', alpha=0.3)
+    # else:
+    #     ax_cl.axis('off')
+    #     ax_cl.text(0.5, 0.5, 'No cleaning funnel data available',
+    #                ha='center', va='center', fontsize=11)
+
+    _add_mission_footer(fig, report, y=0.01)
+    fig.tight_layout(rect=[0, 0.07, 1, 0.95])
+
+    out = output_dir / 'diagnostics.png'
+    fig.savefig(out, dpi=150, bbox_inches='tight')
+    print(f'  Saved → {out}')
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# §12  Window 1 — 3-D trajectory / candidate hemisphere
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_trajectory_figure(
     seed_captures: List[Dict],
@@ -689,8 +788,11 @@ def plot_trajectory_figure(
     output_dir: Path,
 ) -> plt.Figure:
     fig = plt.figure(figsize=(14, 11))
-    fig.suptitle('Drone Trajectory & Candidate Viewpoints  (ENU frame)',
-                 fontsize=13, fontweight='bold')
+    fig.canvas.manager.set_window_title('Window 1 - 3D Trajectory')
+    fig.suptitle(
+        'Drone Trajectory & Candidate Viewpoints (ENU frame)',
+        fontsize=13, fontweight='bold'
+    )
     ax = fig.add_subplot(111, projection='3d')
 
     rc_e = _pt_enu(rock_center)
@@ -701,69 +803,87 @@ def plot_trajectory_figure(
         if len(sub) > 5000:
             sub = sub[np.random.default_rng(42).choice(len(sub), 5000, replace=False)]
         enu = _to_enu(sub)
-        ax.scatter(enu[:, 0], enu[:, 1], enu[:, 2],
-                   s=1, c=_C_CLOUD, alpha=0.20, label='Recon cloud (NBV)')
+        ax.scatter(
+            enu[:, 0], enu[:, 1], enu[:, 2],
+            s=1, c=_C_CLOUD, alpha=0.20, label='Recon cloud (NBV)'
+        )
 
-    # ── Candidate hemisphere (iter-00 pool) ─────────────────────────────────
+    # ── Candidate hemisphere (iter-00 pool) ────────────────────────────────
     if candidates is not None and len(candidates) > 0:
         c_enu = _to_enu(candidates)
-        ax.scatter(c_enu[:, 0], c_enu[:, 1], c_enu[:, 2],
-                   s=14, c=_C_CAND, alpha=0.55, label=f'Candidates ({len(candidates)})',
-                   depthshade=False)
+        ax.scatter(
+            c_enu[:, 0], c_enu[:, 1], c_enu[:, 2],
+            s=14, c=_C_CAND, alpha=0.55,
+            label=f'Candidates ({len(candidates)})',
+            depthshade=False
+        )
 
     # ── Seed captures + spline trajectory ───────────────────────────────────
     if seed_captures:
         seed_pts = np.array([c['ned'] for c in seed_captures])
         seed_enu = _to_enu(seed_pts)
 
-        # Capture positions
-        ax.scatter(seed_enu[:, 0], seed_enu[:, 1], seed_enu[:, 2],
-                   s=55, c=_C_SEED_3D, marker='o', zorder=5,
-                   label=f'Seed captures ({len(seed_captures)})',
-                   edgecolors='white', linewidth=0.6)
-        # Label first and last
-        for i_lbl, (pt, tag) in enumerate([(seed_enu[0], 'S₀'),
-                                            (seed_enu[-1], f'S{len(seed_captures)-1}')]):
-            ax.text(pt[0] + 0.12, pt[1], pt[2] + 0.18, tag,
-                    fontsize=8, color=_C_SEED_3D, fontweight='bold')
+        ax.scatter(
+            seed_enu[:, 0], seed_enu[:, 1], seed_enu[:, 2],
+            s=55, c=_C_SEED_3D, marker='o', zorder=5,
+            label=f'Seed captures ({len(seed_captures)})',
+            edgecolors='white', linewidth=0.6
+        )
 
-        # Spline through seed points (in ENU for smooth geodesic-like curve)
+        for pt, tag in [
+            (seed_enu[0], 'S₀'),
+            (seed_enu[-1], f'S{len(seed_captures)-1}')
+        ]:
+            ax.text(
+                pt[0] + 0.12, pt[1], pt[2] + 0.18, tag,
+                fontsize=8, color=_C_SEED_3D, fontweight='bold'
+            )
+
         if len(seed_pts) >= 4:
-            # Remove any consecutive duplicates before splprep
-            keep = [0] + [i for i in range(1, len(seed_enu))
-                          if np.linalg.norm(seed_enu[i] - seed_enu[i-1]) > 1e-4]
+            keep = [0] + [
+                i for i in range(1, len(seed_enu))
+                if np.linalg.norm(seed_enu[i] - seed_enu[i - 1]) > 1e-4
+            ]
             sp = seed_enu[keep]
             if len(sp) >= 4:
                 try:
                     tck, _ = splprep([sp[:, 0], sp[:, 1], sp[:, 2]], s=0.0, k=3)
                     fine = np.array(splev(np.linspace(0, 1, 400), tck)).T
-                    ax.plot(fine[:, 0], fine[:, 1], fine[:, 2],
-                            color=_C_SEED_3D, linewidth=1.8, alpha=0.65,
-                            label='Seed trajectory (spline)')
+                    ax.plot(
+                        fine[:, 0], fine[:, 1], fine[:, 2],
+                        color=_C_SEED_3D, linewidth=1.8, alpha=0.65,
+                        label='Seed trajectory (spline)'
+                    )
                 except Exception:
-                    # Fallback: straight segments
-                    ax.plot(seed_enu[:, 0], seed_enu[:, 1], seed_enu[:, 2],
-                            color=_C_SEED_3D, linewidth=1.5, alpha=0.65,
-                            label='Seed trajectory')
+                    ax.plot(
+                        seed_enu[:, 0], seed_enu[:, 1], seed_enu[:, 2],
+                        color=_C_SEED_3D, linewidth=1.5, alpha=0.65,
+                        label='Seed trajectory'
+                    )
 
-    # ── NBV visited positions ────────────────────────────────────────────────
+    # ── NBV visited positions ───────────────────────────────────────────────
     if nbv_captures:
         nbv_pts = np.array([c['ned'] for c in nbv_captures])
         nbv_enu = _to_enu(nbv_pts)
-        ax.scatter(nbv_enu[:, 0], nbv_enu[:, 1], nbv_enu[:, 2],
-                   s=140, c=_C_NBV_3D, marker='^', zorder=6,
-                   label=f'NBV captures ({len(nbv_captures)})',
-                   edgecolors='white', linewidth=0.7)
+        ax.scatter(
+            nbv_enu[:, 0], nbv_enu[:, 1], nbv_enu[:, 2],
+            s=140, c=_C_NBV_3D, marker='^', zorder=6,
+            label=f'NBV captures ({len(nbv_captures)})',
+            edgecolors='white', linewidth=0.7
+        )
         for i, pt in enumerate(nbv_enu):
-            ax.text(pt[0] + 0.12, pt[1], pt[2] + 0.18, f'N{i + 1}',
-                    fontsize=8.5, color=_C_NBV_3D, fontweight='bold')
+            ax.text(
+                pt[0] + 0.12, pt[1], pt[2] + 0.18, f'N{i + 1}',
+                fontsize=8.5, color=_C_NBV_3D, fontweight='bold'
+            )
 
-    # ── Rock centre (gold star) ──────────────────────────────────────────────
-    ax.scatter([rc_e[0]], [rc_e[1]], [rc_e[2]],
-               s=450, c=_C_ROCK, marker='*', zorder=10,
-               edgecolors='#B8860B', linewidth=1.2, label='Rock centre')
+    # ── Rock centre (gold star) ─────────────────────────────────────────────
+    ax.scatter(
+        [rc_e[0]], [rc_e[1]], [rc_e[2]],
+        s=450, c=_C_ROCK, marker='*', zorder=10,
+        edgecolors='#B8860B', linewidth=1.2, label='Rock centre'
+    )
 
-    # ── Axes + view ─────────────────────────────────────────────────────────
     ax.set_xlabel('East (m)', labelpad=9)
     ax.set_ylabel('North (m)', labelpad=9)
     ax.set_zlabel('Altitude (m)', labelpad=9)
@@ -777,7 +897,7 @@ def plot_trajectory_figure(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# §11  Main
+# §13  Main
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
@@ -785,35 +905,50 @@ def main() -> None:
         description='Evaluate + plot a photogrammetry-covisibility NBV run.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument('--run-dir', required=True,
-                    help='unified_run_* directory')
-    ap.add_argument('--gt-mesh', required=True,
-                    help='Ground-truth mesh (.obj)')
-    ap.add_argument('--gt-transform', default=None,
-                    help='4×4 .npy NED transform for GT mesh. '
-                         'If omitted, defaults to lunar_sample_15016 at ENU (8,0,0.8) scale 20.')
-    ap.add_argument('--rock-center', nargs=3, type=float, default=[0.0, 8.0, -0.8],
-                    metavar=('X', 'Y', 'Z'), help='Rock centre in NED (m)')
-    ap.add_argument('--align-bbox-half', type=float, default=3.0,
-                    help='Bbox half-extent applied after Umeyama alignment (m)')
-    ap.add_argument('--crop-half-extent', type=float, default=1.5,
-                    help='Bbox half-extent for cleaning step (m)')
-    ap.add_argument('--ground-thresh-m', type=float, default=0.03,
-                    help='RANSAC inlier threshold for ground removal (m)')
+    ap.add_argument('--run-dir', required=True, help='unified_run_* directory')
+    ap.add_argument('--gt-mesh', required=True, help='Ground-truth mesh (.obj)')
+    ap.add_argument(
+        '--gt-transform', default=None,
+        help='4×4 .npy NED transform for GT mesh. '
+             'If omitted, defaults to lunar_sample_15016 at ENU (8,0,0.8) scale 20.'
+    )
+    ap.add_argument(
+        '--rock-center', nargs=3, type=float, default=[0.0, 8.0, -0.8],
+        metavar=('X', 'Y', 'Z'), help='Rock centre in NED (m)'
+    )
+    ap.add_argument(
+        '--align-bbox-half', type=float, default=3.0,
+        help='Bbox half-extent applied after Umeyama alignment (m)'
+    )
+    ap.add_argument(
+        '--crop-half-extent', type=float, default=1.5,
+        help='Bbox half-extent for cleaning step (m)'
+    )
+    ap.add_argument(
+        '--ground-thresh-m', type=float, default=0.03,
+        help='RANSAC inlier threshold for ground removal (m)'
+    )
     ap.add_argument('--ransac-iters', type=int, default=500)
     ap.add_argument('--sor-k', type=int, default=20)
     ap.add_argument('--sor-std-ratio', type=float, default=2.0)
-    ap.add_argument('--gate-dist-m', type=float, default=0.05,
-                    help='Distance gate vs GT surface (m)')
-    ap.add_argument('--thresholds', nargs='+', type=float,
-                    default=[0.016, 0.032, 0.048, 0.064, 0.080],
-                    help='Metric thresholds (m). Defaults are 1-5%% of 1.6m rock height.')
-    ap.add_argument('--gt-samples', type=int, default=100_000,
-                    help='GT surface samples')
-    ap.add_argument('--output-dir', default=None,
-                    help='Output directory (default: <run-dir>/eval)')
-    ap.add_argument('--no-show', action='store_true',
-                    help='Save figures without opening a window')
+    ap.add_argument(
+        '--gate-dist-m', type=float, default=0.05,
+        help='Distance gate vs GT surface (m)'
+    )
+    ap.add_argument(
+        '--thresholds', nargs='+', type=float,
+        default=[0.016, 0.032, 0.048, 0.064, 0.080],
+        help='Metric thresholds (m). Defaults are 1-5%% of 1.6m rock height.'
+    )
+    ap.add_argument('--gt-samples', type=int, default=100_000, help='GT surface samples')
+    ap.add_argument(
+        '--output-dir', default=None,
+        help='Output directory (default: <run-dir>/eval)'
+    )
+    ap.add_argument(
+        '--no-show', action='store_true',
+        help='Save figures without opening windows'
+    )
     ap.add_argument('--seed', type=int, default=42)
     args = ap.parse_args()
 
@@ -822,19 +957,23 @@ def main() -> None:
         print(f'ERROR: --run-dir not found: {run_dir}')
         sys.exit(1)
 
-    output_dir = (Path(args.output_dir).expanduser()
-                  if args.output_dir else run_dir / 'eval')
+    output_dir = (
+        Path(args.output_dir).expanduser().resolve()
+        if args.output_dir else run_dir / 'eval'
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rock_center = np.array(args.rock_center)
     rng = np.random.default_rng(args.seed)
 
-    # ── GT transform ─────────────────────────────────────────────────────────
+    # ── GT transform ────────────────────────────────────────────────────────
     if args.gt_transform:
         T_gt = np.load(args.gt_transform)
     else:
-        print('  No --gt-transform given — using default for lunar_sample_15016 '
-              'at Gazebo ENU (8, 0, 0.8), mesh scale 20.')
+        print(
+            '  No --gt-transform given — using default for lunar_sample_15016 '
+            'at Gazebo ENU (8, 0, 0.8), mesh scale 20.'
+        )
         T_gt = np.array([
             [0,  20,  0,   0.0],
             [20,  0,  0,   8.0],
@@ -842,7 +981,7 @@ def main() -> None:
             [0,   0,  0,   1.0],
         ], dtype=float)
 
-    # ── GT mesh ───────────────────────────────────────────────────────────────
+    # ── GT mesh ─────────────────────────────────────────────────────────────
     print('Loading GT mesh...')
     gt_verts, gt_faces = load_obj_mesh(Path(args.gt_mesh).expanduser())
     gt_verts = apply_T(gt_verts, T_gt)
@@ -850,18 +989,20 @@ def main() -> None:
     print(f'  Sampling {args.gt_samples:,} surface points...')
     gt_samples = sample_mesh_uniformly(gt_verts, gt_faces, args.gt_samples, rng)
     aabb = (gt_samples.min(0), gt_samples.max(0))
-    print(f'  GT AABB: x=[{aabb[0][0]:.3f},{aabb[1][0]:.3f}]  '
-          f'y=[{aabb[0][1]:.3f},{aabb[1][1]:.3f}]  '
-          f'z=[{aabb[0][2]:.3f},{aabb[1][2]:.3f}]')
+    print(
+        f'  GT AABB: x=[{aabb[0][0]:.3f},{aabb[1][0]:.3f}]  '
+        f'y=[{aabb[0][1]:.3f},{aabb[1][1]:.3f}]  '
+        f'z=[{aabb[0][2]:.3f},{aabb[1][2]:.3f}]'
+    )
 
-    # ── Run data ─────────────────────────────────────────────────────────────
+    # ── Run data ────────────────────────────────────────────────────────────
     print('Loading run data...')
     mission_params = load_mission_params(run_dir)
     seed_captures = load_seed_trajectory(run_dir)
     nbv_captures = load_nbv_positions(run_dir)
     candidates = load_candidates(run_dir)
     sparse_metrics = load_sparse_metrics(run_dir)
-    score_evolution = load_score_evolution(run_dir)
+    score_evolution = load_score_evolution(run_dir)  # kept loaded for future use
 
     print(f'  Seed captures : {len(seed_captures)}')
     print(f'  NBV captures  : {len(nbv_captures)}')
@@ -869,12 +1010,14 @@ def main() -> None:
     print(f'  Sparse iters  : {len(sparse_metrics)}')
     print(f'  Score entries : {len(score_evolution)}')
     if mission_params:
-        print(f'  Stop criterion: {mission_params.get("stopping_criterion", "?")}  '
-              f'knn_thresh={mission_params.get("knn_distance_threshold", "?")}  '
-              f'budget={mission_params.get("image_budget", "?")}'
-              f'/{mission_params.get("max_image_budget", "?")}')
+        print(
+            f'  Stop criterion: {mission_params.get("stopping_criterion", "?")}  '
+            f'knn_thresh={mission_params.get("knn_distance_threshold", "?")}  '
+            f'budget={mission_params.get("image_budget", "?")}'
+            f'/{mission_params.get("max_image_budget", "?")}'
+        )
 
-    # ── Build cloud pipeline specs ────────────────────────────────────────────
+    # ── Build cloud pipeline specs ─────────────────────────────────────────
     cloud_specs = [
         (
             'seed',
@@ -923,11 +1066,14 @@ def main() -> None:
 
         try:
             pts_ned, align_info = align_cloud(
-                cloud_path, images_bin, meta_dirs, rock_center, args.align_bbox_half)
-            print(f'  Aligned: {align_info["matched"]} cameras  '
-                  f'scale={align_info["scale"]:.4f}  '
-                  f'RMS={align_info["rms_residual_m"]*1000:.1f} mm  '
-                  f'({align_info["bbox_kept"]:,}/{align_info["bbox_total"]:,} pts after bbox)')
+                cloud_path, images_bin, meta_dirs, rock_center, args.align_bbox_half
+            )
+            print(
+                f'  Aligned: {align_info["matched"]} cameras  '
+                f'scale={align_info["scale"]:.4f}  '
+                f'RMS={align_info["rms_residual_m"]*1000:.1f} mm  '
+                f'({align_info["bbox_kept"]:,}/{align_info["bbox_total"]:,} pts after bbox)'
+            )
         except RuntimeError as e:
             print(f'  ERROR: {e}')
             report['clouds'][label] = {'error': str(e)}
@@ -936,14 +1082,17 @@ def main() -> None:
         pts, steps = clean_cloud(
             pts_ned, gt_samples, rock_center,
             args.crop_half_extent, args.ground_thresh_m, args.ransac_iters,
-            args.sor_k, args.sor_std_ratio, args.gate_dist_m, rng)
+            args.sor_k, args.sor_std_ratio, args.gate_dist_m, rng
+        )
         print(f'  Cleaning steps: {steps}')
 
         if len(pts) == 0:
             print('  WARNING: no points after cleaning — check rock_center / transforms')
             report['clouds'][label] = {
-                'alignment': align_info, 'step_counts': steps,
-                'error': 'no points after cleaning'}
+                'alignment': align_info,
+                'step_counts': steps,
+                'error': 'no points after cleaning'
+            }
             continue
 
         cleaned_path = output_dir / f'cleaned_{label}.ply'
@@ -958,12 +1107,16 @@ def main() -> None:
         t_labels = [f'{t * 1000:.0f}mm' for t in args.thresholds]
         print(f'  {"Threshold":<10} {"Completeness":>13} {"Accuracy":>11} {"F-score":>9}')
         for tl in t_labels:
-            print(f'  {tl:<10} {metrics[f"completeness_{tl}"]:>12.1f}%'
-                  f' {metrics[f"accuracy_{tl}"]:>10.1f}%'
-                  f' {metrics[f"fscore_{tl}"]:>8.1f}%')
-        print(f'  Mean C2C: {metrics["mean_c2c_m"]*1000:.1f} mm  |  '
-              f'Median: {metrics["median_c2c_m"]*1000:.1f} mm  |  '
-              f'P95: {metrics["p95_c2c_m"]*1000:.1f} mm')
+            print(
+                f'  {tl:<10} {metrics[f"completeness_{tl}"]:>12.1f}%'
+                f' {metrics[f"accuracy_{tl}"]:>10.1f}%'
+                f' {metrics[f"fscore_{tl}"]:>8.1f}%'
+            )
+        print(
+            f'  Mean C2C: {metrics["mean_c2c_m"]*1000:.1f} mm  |  '
+            f'Median: {metrics["median_c2c_m"]*1000:.1f} mm  |  '
+            f'P95: {metrics["p95_c2c_m"]*1000:.1f} mm'
+        )
 
         report['clouds'][label] = {
             'cloud_path': str(cloud_path),
@@ -973,7 +1126,7 @@ def main() -> None:
             'metrics': metrics,
         }
 
-    # ── Cross-cloud comparison ─────────────────────────────────────────────
+    # ── Cross-cloud comparison ──────────────────────────────────────────────
     valid = [k for k in report['clouds'] if 'metrics' in report['clouds'][k]]
     if len(valid) == 2:
         a, b = valid[0], valid[1]
@@ -991,21 +1144,25 @@ def main() -> None:
         dc2c = bm['mean_c2c_m'] - am['mean_c2c_m']
         cmp['d_mean_c2c_m'] = round(dc2c, 6)
         sign = '+' if dc2c >= 0 else ''
-        print(f'  Mean C2C: {am["mean_c2c_m"]*1000:.1f} mm → '
-              f'{bm["mean_c2c_m"]*1000:.1f} mm  ({sign}{dc2c*1000:.1f} mm)')
+        print(
+            f'  Mean C2C: {am["mean_c2c_m"]*1000:.1f} mm → '
+            f'{bm["mean_c2c_m"]*1000:.1f} mm  ({sign}{dc2c*1000:.1f} mm)'
+        )
         report['comparison'] = {'baseline': a, 'improved': b, 'deltas': cmp}
 
-    # ── JSON report ───────────────────────────────────────────────────────────
+    # ── JSON report ─────────────────────────────────────────────────────────
     report_path = output_dir / 'report.json'
     with open(report_path, 'w') as f:
         json.dump(report, f, indent=2)
     print(f'\nReport → {report_path}')
 
-    # ── Figures ───────────────────────────────────────────────────────────────
+    # ── Figures / windows ───────────────────────────────────────────────────
     print('\nGenerating figures...')
-    plot_metrics_figure(report, sparse_metrics, score_evolution, output_dir)
-    plot_trajectory_figure(seed_captures, nbv_captures, candidates,
-                            rock_center, cleaned_nbv, output_dir)
+    plot_trajectory_figure(
+        seed_captures, nbv_captures, candidates, rock_center, cleaned_nbv, output_dir
+    )
+    plot_metrics_figure(report, output_dir)
+    plot_diagnostics_figure(report, sparse_metrics, output_dir)
 
     if not args.no_show:
         plt.show()
