@@ -1,5 +1,5 @@
 scorer:
-  name: covisibility
+  name: baseline_aware_repair_weighted_covisibility             # covisibility | repair_weighted_covisibility | baseline_aware_repair_covisibility
   weights:
     covisibility: 1.0
     novelty: 1.2
@@ -12,3 +12,29 @@ scorer:
   yaw_change_scale_rad: 3.141592653589793
   novelty_distance_scale_m: 2.0
   scoring_bbox_half_extent: 2.0
+
+  # --- Repair-weighted co-visibility scorer parameters ---
+  # Active when scorer.name = repair_weighted_covisibility
+  # Also used as weakness base by baseline_aware_repair_weighted_covisibility
+  repair_weighted_covisibility:
+    target_track_length: 6
+    density_k: 5
+    max_scored_points: 0            # 0 = no cap
+    weakness_weights:
+      track_support: 0.6
+      local_density: 0.4
+      reprojection: 0.0             # disabled until validated
+
+  # --- Baseline-aware repair-weighted co-visibility scorer parameters ---
+  # Active when scorer.name = baseline_aware_repair_weighted_covisibility
+  baseline_aware_repair_weighted_covisibility:
+    target_track_length: 6
+    density_k: 5
+    max_scored_points: 0
+    weakness_weights:
+      track_support: 0.6
+      local_density: 0.4
+      reprojection: 0.0
+    theta_low_deg: 5.0              # angles below this get zero gain
+    theta_target_deg: 25.0          # full gain reached at this angle
+    theta_high_deg: 45.0            # gain saturates at 1.0 above this

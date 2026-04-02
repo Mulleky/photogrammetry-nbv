@@ -14,11 +14,11 @@
     rock_center_y: 8.0
     rock_center_z: -0.8
     image_budget: 40
-    max_image_budget: 55
+    max_image_budget: 50
     stopping_criterion: image_budget   # 'image_budget' | 'knn_distance' | 'both'
     knn_distance_threshold: 0.003
 
-    raw_candidate_count: 800
+    raw_candidate_count: 700
     target_candidate_count: 200
     candidate_radius_m: 3.5
     candidate_min_spacing_m: 0.3
