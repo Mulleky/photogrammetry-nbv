@@ -2,10 +2,15 @@
 """Run COLMAP dense reconstruction (undistortion + patch_match_stereo + fusion)."""
 from __future__ import annotations
 
+import logging
+import shutil
 import subprocess
 from pathlib import Path
 
 from common import find_best_sparse_model, load_cfg, load_request_json
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+log = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -20,6 +25,32 @@ def main() -> None:
     sparse_dir = find_best_sparse_model(workspace / 'sparse')
     dense_dir = workspace / 'dense'
     dense_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Final global BA to polish all poses before dense reconstruction ---
+    incremental_cfg = cfg.get('incremental', {})
+    if incremental_cfg.get('final_global_ba', True) and (sparse_dir / 'cameras.bin').exists():
+        ba_iterations = int(incremental_cfg.get('ba_max_num_iterations', 100)) * 2  # 200 default
+        ba_output = workspace / 'sparse' / '_final_ba'
+        ba_output.mkdir(parents=True, exist_ok=True)
+        log.info('Running final global BA (%d iterations) before dense reconstruction', ba_iterations)
+        try:
+            _run([
+                colmap_bin, 'bundle_adjuster',
+                '--input_path', str(sparse_dir),
+                '--output_path', str(ba_output),
+                '--BundleAdjustment.max_num_iterations', str(ba_iterations),
+            ])
+            # Use BA-refined model for dense reconstruction
+            for fname in ('cameras.bin', 'images.bin', 'points3D.bin'):
+                src = ba_output / fname
+                if src.exists():
+                    shutil.copy2(str(src), str(sparse_dir / fname))
+            log.info('Final global BA completed successfully')
+        except RuntimeError as exc:
+            log.warning('Final global BA failed (proceeding with existing model): %s', exc)
+        finally:
+            if ba_output.exists():
+                shutil.rmtree(str(ba_output), ignore_errors=True)
 
     _run([
         colmap_bin, 'image_undistorter',

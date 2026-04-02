@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import struct
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 
 def load_request_json() -> Dict[str, Any]:
@@ -215,9 +218,23 @@ def collect_sparse_summary(workspace: Path, cfg: Dict[str, Any]) -> Dict[str, An
         pts_array = np.array(list(points.values()), dtype=np.float64)
         knn_distance_metrics = compute_knn_distances(pts_array, k=knn_k, percentile=knn_pct)
 
+    # Check for unregistered images
+    images_on_disk = (
+        list((workspace / 'images').glob('*.png'))
+        + list((workspace / 'images').glob('*.jpg'))
+        + list((workspace / 'images').glob('*.jpeg'))
+    )
+    total_on_disk = len(images_on_disk)
+    if total_on_disk > aligned_count:
+        log.warning(
+            'Registration gap: %d images on disk but only %d registered in sparse model',
+            total_on_disk, aligned_count,
+        )
+
     return {
         'total_cameras': total_cameras,
         'aligned_cameras': aligned_count,
+        'total_images_on_disk': total_on_disk,
         'sparse_point_count': len(points),
         'global_metrics': global_metrics,
         'weak_regions': weak_regions,

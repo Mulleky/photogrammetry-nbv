@@ -2,7 +2,7 @@ colmap:
   # --- Feature extraction (SIFT) ---
   feature_extraction:
     camera_model: PINHOLE
-    max_num_features: 8192
+    max_num_features: 16384
 
   # --- Feature matching ---
   matching:
@@ -15,7 +15,7 @@ colmap:
 
   # --- Dense reconstruction ---
   dense:
-    max_image_size: 1000
+    max_image_size: 2000
     geom_consistency: true
 
   # --- Weak-region extraction (for legacy weighted_sum scorer) ---
@@ -34,3 +34,10 @@ colmap:
   knn_distance:
     k: 5
     percentile: 95.0
+
+  # --- Incremental update strategy ---
+  incremental:
+    enabled: true                    # false = full rebuild each iteration (previous behavior)
+    global_ba_interval: 2            # run explicit global BA every N adaptive images
+    final_global_ba: true            # global BA before dense reconstruction
+    ba_max_num_iterations: 100       # iterations for periodic/final global BA

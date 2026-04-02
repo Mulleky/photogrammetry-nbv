@@ -2,8 +2,8 @@ scorer:
   name: covisibility
   weights:
     covisibility: 1.0
-    novelty: 0.8
-    movement_cost: 0.2
+    novelty: 1.2
+    movement_cost: 0.1
     angular_separation_penalty: 0.4
   min_track_length: 2
   min_angular_separation_deg: 20.0
