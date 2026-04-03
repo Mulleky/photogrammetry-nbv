@@ -1,5 +1,5 @@
 scorer:
-  name: baseline_aware_repair_weighted_covisibility             # covisibility | repair_weighted_covisibility | baseline_aware_repair_covisibility
+  name: covisibility             # covisibility | repair_weighted_covisibility | baseline_aware_repair_covisibility
   weights:
     covisibility: 1.0
     novelty: 1.2
@@ -21,9 +21,9 @@ scorer:
     density_k: 5
     max_scored_points: 0            # 0 = no cap
     weakness_weights:
-      track_support: 0.6
-      local_density: 0.4
-      reprojection: 0.0             # disabled until validated
+      track_support: 0.5
+      local_density: 0.3
+      reprojection: 0.2             # disabled until validated
 
   # --- Baseline-aware repair-weighted co-visibility scorer parameters ---
   # Active when scorer.name = baseline_aware_repair_weighted_covisibility

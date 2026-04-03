@@ -5,7 +5,7 @@
 
     # === Phase 1 — Seed hemisphere ===
     seed_radius_m: 4.0
-    ring_image_count: 20
+    ring_image_count: 24
     seed_min_elevation_deg: 5.0
     seed_max_elevation_deg: 30.0
 
@@ -14,11 +14,11 @@
     rock_center_y: 8.0
     rock_center_z: -0.8
     image_budget: 40
-    max_image_budget: 50
+    max_image_budget: 55
     stopping_criterion: image_budget   # 'image_budget' | 'knn_distance' | 'both'
     knn_distance_threshold: 0.003
 
-    raw_candidate_count: 700
+    raw_candidate_count: 800
     target_candidate_count: 200
     candidate_radius_m: 3.5
     candidate_min_spacing_m: 0.3
@@ -33,8 +33,8 @@
 
     # === Planner mode ===
     seed_planner_mode: stratified         # 'fibonacci' | 'stratified'
-    seed_elevation_rings_deg: [15.0, 25.0, 35.0, 45.0]
-    seed_azimuth_counts: [8, 6, 4, 2]
+    seed_elevation_rings_deg: [15.0, 22.0, 29.0, 36.0]
+    seed_azimuth_counts: [8, 6, 6, 4]
 
     phase2_planner_mode: hybrid           # 'fibonacci' | 'stratified' | 'hybrid'
     phase2_lateral_elevations_deg: [10.0, 15.0, 25.0, 35.0]
@@ -48,7 +48,7 @@
     # === Shared flight parameters ===
     takeoff_altitude: 3.0
     offboard_rate_hz: 10.0
-    setpoint_warmup_cycles: 15
+    setpoint_warmup_cycles: 20
     position_tolerance_xy: 0.35
     position_tolerance_z: 0.35
     settle_time_sec: 2.0

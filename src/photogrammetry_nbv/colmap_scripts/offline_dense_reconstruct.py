@@ -39,6 +39,7 @@ def main() -> None:
                 '--input_path', str(sparse_dir),
                 '--output_path', str(ba_output),
                 '--BundleAdjustment.max_num_iterations', str(ba_iterations),
+                '--BundleAdjustmentCeres.use_gpu', '1',
             ])
             # Use BA-refined model for dense reconstruction
             for fname in ('cameras.bin', 'images.bin', 'points3D.bin'):

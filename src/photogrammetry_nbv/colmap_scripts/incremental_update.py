@@ -121,6 +121,7 @@ def _run_incremental_registration(
         '--database_path', str(database),
         '--input_path', str(model_path),
         '--output_path', str(model_path),
+        '--Mapper.ba_use_gpu', '1',
     ])
     log.info('image_registrator completed in %.1f s', time.monotonic() - t0)
 
@@ -147,6 +148,7 @@ def _run_incremental_registration(
             '--input_path', str(model_path),
             '--output_path', str(ba_output),
             '--BundleAdjustment.max_num_iterations', str(ba_iterations),
+            '--BundleAdjustmentCeres.use_gpu', '1',
         ])
         log.info('bundle_adjuster completed in %.1f s', time.monotonic() - t2)
         # Replace model with refined version
@@ -182,6 +184,7 @@ def _run_full_mapper(
         cmd += ['--Mapper.ba_global_max_num_iterations', str(mapper_cfg['ba_global_max_num_iterations'])]
     if 'filter_max_reproj_error' in mapper_cfg:
         cmd += ['--Mapper.filter_max_reproj_error', str(mapper_cfg['filter_max_reproj_error'])]
+    cmd += ['--Mapper.ba_use_gpu', '1']
     _run(cmd)
     log.info('Full mapper completed in %.1f s', time.monotonic() - t0)
 

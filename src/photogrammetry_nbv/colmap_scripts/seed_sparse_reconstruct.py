@@ -57,6 +57,7 @@ def main() -> None:
         mapper_cmd += ['--Mapper.ba_global_max_num_iterations', str(mapper_cfg['ba_global_max_num_iterations'])]
     if 'filter_max_reproj_error' in mapper_cfg:
         mapper_cmd += ['--Mapper.filter_max_reproj_error', str(mapper_cfg['filter_max_reproj_error'])]
+    mapper_cmd += ['--Mapper.ba_use_gpu', '1']
     _run(mapper_cmd)
 
     # Export to PLY

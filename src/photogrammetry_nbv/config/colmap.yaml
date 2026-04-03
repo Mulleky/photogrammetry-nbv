@@ -38,6 +38,6 @@ colmap:
   # --- Incremental update strategy ---
   incremental:
     enabled: true                    # false = full rebuild each iteration (previous behavior)
-    global_ba_interval: 4            # run explicit global BA every N adaptive images
+    global_ba_interval: 2            # run explicit global BA every N adaptive images
     final_global_ba: true            # global BA before dense reconstruction
     ba_max_num_iterations: 100       # iterations for periodic/final global BA
