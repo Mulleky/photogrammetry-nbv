@@ -7,7 +7,12 @@ package_name = 'photogrammetry_nbv'
 setup(
     name=package_name,
     version='0.1.0',
-    packages=[package_name, package_name + '.scorers'],
+    packages=[
+        package_name,
+        package_name + '.scorers',
+        package_name + '.gt_supervision',
+        package_name + '.adaptive',
+    ],
     data_files=[
         ('share/ament_index/resource_index/packages', [os.path.join('resource', package_name)]),
         (os.path.join('share', package_name), ['package.xml']),

@@ -1,5 +1,5 @@
 scorer:
-  name: covisibility             # covisibility | repair_weighted_covisibility | baseline_aware_repair_covisibility
+  name: gt_phase_adaptive_hybrid             # covisibility | repair_weighted_covisibility | baseline_aware_repair_covisibility
   weights:
     covisibility: 1.0
     novelty: 1.2
@@ -38,3 +38,26 @@ scorer:
     theta_low_deg: 5.0              # angles below this get zero gain
     theta_target_deg: 25.0          # full gain reached at this angle
     theta_high_deg: 45.0            # gain saturates at 1.0 above this
+
+  # --- GT Phase-Adaptive Hybrid scorer parameters ---
+  # Active when scorer.name = gt_phase_adaptive_hybrid
+  # Wraps covisibility + baseline_aware_repair_weighted_covisibility
+  # and switches between them per iteration using a gate.
+  hybrid:
+    gate_mode: oracle               # shadow | heuristic | oracle | learned_switch
+
+    heuristic:
+      budget_fraction_threshold: 0.4  # below this -> geometry scorer
+      knn_p95_threshold: 0.14         # above this -> geometry scorer
+
+    oracle:
+      gt_mesh_path: "/home/dreamslab/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj"              # path to GT .obj mesh (required for oracle mode)
+      n_gt_samples: 30000           # surface samples for coverage evaluation
+      coverage_threshold_m: 0.02    # distance threshold to mark a sample as covered
+
+    learned_switch:
+      policy_json_path: ""          # path to exported decision-tree JSON
+
+    shadow:
+      enabled: true                 # write shadow logs regardless of gate_mode
+      log_top_k: 5                  # top-k candidates logged per scorer
