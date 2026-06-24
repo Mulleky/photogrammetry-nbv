@@ -145,6 +145,8 @@ class UnifiedControllerNode(Node):
         self._score_thread: Optional[threading.Thread] = None
         self._score_result = None
         self._score_error: Optional[Exception] = None
+        self._bootstrap_thread: Optional[threading.Thread] = None
+        self._bootstrap_error: Optional[Exception] = None
 
         # ---- Output directories ----
         self._prepare_output_dirs()
@@ -633,38 +635,66 @@ class UnifiedControllerNode(Node):
 
         # --- Transition: Bootstrap COLMAP with seed images ---
         if self.state == State.BOOTSTRAP_PROJECT:
-            if not self.project_bootstrapped:
-                metrics_json = self.sparse_metrics_dir / 'metrics_iter_00.json'
-                self.worker.bootstrap_project(
-                    self.colmap_dir, self.seed_images_captured, metrics_json, self.colmap_cfg)
-                self.project_bootstrapped = True
-                snapshot = load_sparse_metrics(metrics_json, iteration=0)
-                pt_count = snapshot.sparse_point_count
-                if pt_count < 50:
-                    self.get_logger().error(
-                        f'[Phase2] WARNING: COLMAP produced only {pt_count} sparse points from seed images '
-                        f'(threshold: 50). Rock may lack texture or seed poses may be degenerate. '
-                        f'NBV scoring may be unreliable.')
-                else:
-                    self.get_logger().info(f'[Phase2] COLMAP bootstrapped with seed images. Sparse points: {pt_count}')
+            if self.project_bootstrapped:
+                self.state = State.SCORE_NEXT_VIEW
+                return
 
-                # Save a snapshot of the bootstrap sparse model so the seed-baseline
-                # eval uses the fully-connected model (all 20 cameras, correct scale)
-                # rather than the standalone reconstruction that typically fragments.
-                _sparse_dir = self.colmap_dir / 'sparse'
-                _best, _best_count = _sparse_dir / '0', -1
-                for _sub in sorted(_sparse_dir.iterdir()):
-                    if _sub.is_dir() and _sub.name.isdigit() and (_sub / 'images.bin').exists():
-                        with open(_sub / 'images.bin', 'rb') as _f:
-                            _n = struct.unpack('<Q', _f.read(8))[0]
-                        if _n > _best_count:
-                            _best_count, _best = _n, _sub
-                _snapshot = self.colmap_dir / 'seed_sparse_snapshot'
-                if _snapshot.exists():
-                    shutil.rmtree(str(_snapshot))
-                shutil.copytree(str(_best), str(_snapshot))
-                self.get_logger().info(
-                    f'[Phase2] Saved bootstrap sparse snapshot ({_best_count} cameras) → seed_sparse_snapshot/')
+            # --- Async bootstrap_project (non-blocking) ---
+            if self._bootstrap_thread is None:
+                metrics_json = self.sparse_metrics_dir / 'metrics_iter_00.json'
+                self._bootstrap_error = None
+
+                def _do_bootstrap(colmap_dir=self.colmap_dir, images=self.seed_images_captured,
+                                   mj=metrics_json, cfg=self.colmap_cfg):
+                    try:
+                        self.worker.bootstrap_project(colmap_dir, images, mj, cfg)
+                    except Exception as exc:
+                        self._bootstrap_error = exc
+
+                self._bootstrap_thread = threading.Thread(target=_do_bootstrap, daemon=True)
+                self._bootstrap_thread.start()
+                self.get_logger().info('[Phase2] bootstrap_project started in background...')
+                return  # keep publishing offboard setpoints
+
+            if self._bootstrap_thread.is_alive():
+                return  # still running — keep publishing offboard setpoints
+
+            # Thread finished
+            self._bootstrap_thread = None
+            if self._bootstrap_error:
+                self.get_logger().error(f'[Phase2] bootstrap_project failed: {self._bootstrap_error}')
+                self.state = State.RETURN_HOME
+                return
+
+            self.project_bootstrapped = True
+            metrics_json = self.sparse_metrics_dir / 'metrics_iter_00.json'
+            snapshot = load_sparse_metrics(metrics_json, iteration=0)
+            pt_count = snapshot.sparse_point_count
+            if pt_count < 50:
+                self.get_logger().error(
+                    f'[Phase2] WARNING: COLMAP produced only {pt_count} sparse points from seed images '
+                    f'(threshold: 50). Rock may lack texture or seed poses may be degenerate. '
+                    f'NBV scoring may be unreliable.')
+            else:
+                self.get_logger().info(f'[Phase2] COLMAP bootstrapped with seed images. Sparse points: {pt_count}')
+
+            # Save a snapshot of the bootstrap sparse model so the seed-baseline
+            # eval uses the fully-connected model (all 20 cameras, correct scale)
+            # rather than the standalone reconstruction that typically fragments.
+            _sparse_dir = self.colmap_dir / 'sparse'
+            _best, _best_count = _sparse_dir / '0', -1
+            for _sub in sorted(_sparse_dir.iterdir()):
+                if _sub.is_dir() and _sub.name.isdigit() and (_sub / 'images.bin').exists():
+                    with open(_sub / 'images.bin', 'rb') as _f:
+                        _n = struct.unpack('<Q', _f.read(8))[0]
+                    if _n > _best_count:
+                        _best_count, _best = _n, _sub
+            _snapshot = self.colmap_dir / 'seed_sparse_snapshot'
+            if _snapshot.exists():
+                shutil.rmtree(str(_snapshot))
+            shutil.copytree(str(_best), str(_snapshot))
+            self.get_logger().info(
+                f'[Phase2] Saved bootstrap sparse snapshot ({_best_count} cameras) → seed_sparse_snapshot/')
 
             self.state = State.SCORE_NEXT_VIEW
             return

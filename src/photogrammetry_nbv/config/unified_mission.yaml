@@ -15,7 +15,7 @@
     rock_center_z: -0.8
     image_budget: 40
     max_image_budget: 55
-    stopping_criterion: image_budget   # 'image_budget' | 'knn_distance' | 'both'
+    stopping_criterion: both   # 'image_budget' | 'knn_distance' | 'both'
     knn_distance_threshold: 0.003
 
     raw_candidate_count: 800
@@ -33,7 +33,7 @@
 
     # === Planner mode ===
     seed_planner_mode: stratified         # 'fibonacci' | 'stratified'
-    seed_elevation_rings_deg: [15.0, 22.0, 29.0, 36.0]
+    seed_elevation_rings_deg: [12.0, 19.0, 27.0, 34.0]
     seed_azimuth_counts: [8, 6, 6, 4]
 
     phase2_planner_mode: hybrid           # 'fibonacci' | 'stratified' | 'hybrid'
@@ -57,7 +57,7 @@
     image_format: jpg
 
     # === Paths ===
-    colmap_bin: colmap
+    colmap_bin: /home/carlos/colmap/build/src/colmap/exe/colmap
     colmap_script_dir: ~/photogrammetry-covisibility/src/photogrammetry_nbv/colmap_scripts
     colmap_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/colmap.yaml
     scoring_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/scoring.yaml

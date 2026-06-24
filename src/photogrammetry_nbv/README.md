@@ -8,6 +8,20 @@ See the [workspace README](../../README.md) for full setup and launch instructio
 
 ---
 
+## Running the mission
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/px4_msgs_ws/install/setup.bash
+source ~/photogrammetry-covisibility/install/setup.bash
+
+ros2 launch photogrammetry_nbv unified_mission.launch.py
+```
+
+Launch arguments (`px4_autopilot_path`, `px4_gz_world`, `px4_make_target`, `xrce_udp_port`, `start_px4`, `start_xrce_agent`, `start_bridge`) can override defaults, e.g. `ros2 launch photogrammetry_nbv unified_mission.launch.py start_px4:=false` if PX4 is already running externally.
+
+---
+
 ## Package components
 
 ### unified_controller_node.py
@@ -144,7 +158,43 @@ python3 scripts/evaluate_run.py \
     --thresholds 0.005 0.01 0.02 0.05
 ```
 
-See the [workspace README](../../README.md) for how to build `gt_ned.npy`.
+`--gt-transform` is a 4×4 `.npy` matrix mapping the GT mesh's model-local frame into NED; if omitted, the mesh is used as-is. For `lunar_sample_15016` at Gazebo ENU (8, 0, 0.8), build it with an ENU→NED rotation (swap X/Y, negate Z) plus translation:
+
+```python
+import numpy as np
+R = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]], dtype=float)
+t = np.array([0, 8, -0.8])          # NED position of model origin
+T = np.eye(4); T[:3, :3] = R; T[:3, 3] = t
+np.save('gt_ned.npy', T)
+```
+
+`eval_and_plot.py` already defaults to an equivalent built-in matrix (with mesh scale 20 baked in) for `lunar_sample_15016`, so you only need to build your own `.npy` for a different GT model or placement.
+
+### compare_scorers.py
+Computes Hausdorff distance (GT→recon and recon→GT) plus mean/P95 cloud-to-cloud distance for sparse and dense clouds, and compares metrics across multiple scorer runs.
+
+```bash
+python3 scripts/compare_scorers.py \
+    ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260620_085130 \
+    ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260621_103000 \
+    --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj \
+    --output-dir ~/photogrammetry_NBV/data/comparisons \
+    --no-show
+```
+
+Accepts one or more `unified_run_*` directories (one per scorer/run) and writes `hausdorff_distance_summary.png` plus other comparison plots into a timestamped subfolder of `--output-dir`.
+
+### eval_and_plot.py
+All-in-one pipeline: auto-discovers seed/NBV clouds in a `unified_run_*` directory, aligns them (same Umeyama approach as `align_cloud.py`), computes the same C2C/completeness/accuracy/F-score metrics as `evaluate_run.py`, and generates plots.
+
+```bash
+python3 scripts/eval_and_plot.py \
+    --run-dir ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260620_085130 \
+    --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj \
+    --no-show
+```
+
+Outputs `report.json`, `trajectory_3d.png`, `metrics.png`, and a two-panel `diagnostics.png` (cloud-to-cloud distance summary, sparse reconstruction evolution) inside the run directory.
 
 ---
 

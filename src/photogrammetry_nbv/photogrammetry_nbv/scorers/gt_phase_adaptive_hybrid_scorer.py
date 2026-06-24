@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -70,6 +71,12 @@ class GTPhaseAdaptiveHybridScorer(BaseScorer):
         oracle_cfg = self._hybrid_cfg.get('oracle', {})
         mesh_path = oracle_cfg.get('gt_mesh_path', '')
         if not mesh_path:
+            warnings.warn(
+                'gate_mode is "oracle" but hybrid.oracle.gt_mesh_path is unset. '
+                'The oracle gate will silently fall back to the coverage scorer '
+                'every iteration. Set gt_mesh_path in scoring.yaml to enable it.',
+                stacklevel=2,
+            )
             return
         from ..gt_supervision.mesh_oracle import MeshOracle
         from ..gt_supervision.coverage_state import CoverageState
@@ -262,7 +269,28 @@ class GTPhaseAdaptiveHybridScorer(BaseScorer):
         features['_oracle_reward_cov'] = reward_cov
         features['_oracle_reward_geo'] = reward_geo
 
-        return 'geometry' if reward_geo > reward_cov else 'coverage'
+        # The mesh-coverage reward above only credits newly-visible GT surface,
+        # so it is blind to the geometry scorer's actual goal: adding a new
+        # triangulation baseline on weak points that are, by construction,
+        # already-tracked (and so usually already "covered"). Without this
+        # term the oracle would almost always prefer coverage regardless of
+        # how much the geometry pick actually improves reconstruction quality.
+        oracle_cfg = self._hybrid_cfg.get('oracle', {})
+        quality_weight = float(oracle_cfg.get('quality_credit_weight', 0.5))
+        quality_cov = scores_cov[0].terms.get('covisibility', 0.0)
+        quality_geo = scores_geo[0].terms.get('normalized_geometry_aware_repair_score', 0.0)
+
+        total_cov = reward_cov + quality_weight * quality_cov
+        total_geo = reward_geo + quality_weight * quality_geo
+
+        if total_geo == total_cov:
+            # Neutral tiebreak (was: always 'coverage'): defer to whichever
+            # scorer is more confident in its own top pick.
+            margin_cov = features.get('top_margin_cov', 0.0)
+            margin_geo = features.get('top_margin_geo', 0.0)
+            return 'geometry' if margin_geo > margin_cov else 'coverage'
+
+        return 'geometry' if total_geo > total_cov else 'coverage'
 
     def _learned_gate(self, features: Dict[str, float]) -> str:
         if self._tree_policy is None:

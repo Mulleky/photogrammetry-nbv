@@ -945,7 +945,7 @@ def main() -> None:
     )
     ap.add_argument(
         '--output-dir', type=str,
-        default='/home/dreamslab/Desktop/results/final results',
+        default='~/photogrammetry_NBV/data/comparisons',
         help='Base directory for output (a timestamped subfolder is created)'
     )
     ap.add_argument(
@@ -978,7 +978,7 @@ def main() -> None:
 
     # Create a new timestamped subfolder for each run
     timestamp = time.strftime('%Y%m%d_%H%M%S')
-    output_dir = Path(args.output_dir) / f'comparison_{timestamp}'
+    output_dir = Path(args.output_dir).expanduser() / f'comparison_{timestamp}'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rock_center = np.array(args.rock_center)

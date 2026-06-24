@@ -24,7 +24,7 @@ def generate_launch_description():
     xrce_cmd = ['bash', '-lc', ['MicroXRCEAgent udp4 -p ', xrce_udp_port]]
 
     return LaunchDescription([
-        DeclareLaunchArgument('px4_autopilot_path', default_value='/home/dreamslab/PX4-Autopilot'),
+        DeclareLaunchArgument('px4_autopilot_path', default_value='/home/carlos/PX4-Autopilot'),
         DeclareLaunchArgument('px4_gz_world', default_value='sample_15016'),
         DeclareLaunchArgument('px4_make_target', default_value='gz_px4_gsplat'),
         DeclareLaunchArgument('xrce_udp_port', default_value='8888'),

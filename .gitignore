@@ -15,3 +15,6 @@ __pycache__/
 
 # Generated request cache files
 *.request.json
+
+# AI session memory notes (local reference only, not for upstream)
+AI_NOTES.md

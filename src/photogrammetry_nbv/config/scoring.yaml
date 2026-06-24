@@ -44,16 +44,22 @@ scorer:
   # Wraps covisibility + baseline_aware_repair_weighted_covisibility
   # and switches between them per iteration using a gate.
   hybrid:
-    gate_mode: oracle               # shadow | heuristic | oracle | learned_switch
+    gate_mode: heuristic               # shadow | heuristic | oracle | learned_switch
 
     heuristic:
       budget_fraction_threshold: 0.4  # below this -> geometry scorer
       knn_p95_threshold: 0.14         # above this -> geometry scorer
 
     oracle:
-      gt_mesh_path: "/home/dreamslab/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj"              # path to GT .obj mesh (required for oracle mode)
+      gt_mesh_path: "/home/carlos/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj"              # path to GT .obj mesh (required for oracle mode)
       n_gt_samples: 30000           # surface samples for coverage evaluation
       coverage_threshold_m: 0.02    # distance threshold to mark a sample as covered
+      quality_credit_weight: 0.5    # weight on each scorer's own normalized primary
+                                     # term, added to the GT mesh-coverage reward before
+                                     # comparing. Without this, the oracle is blind to the
+                                     # geometry scorer's triangulation-baseline gains on
+                                     # already-covered points and is structurally biased
+                                     # toward always choosing coverage.
 
     learned_switch:
       policy_json_path: ""          # path to exported decision-tree JSON

@@ -31,7 +31,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'px4_autopilot_path',
-            default_value='/home/dreamslab/PX4-Autopilot',
+            default_value='/home/carlos/PX4-Autopilot',
             description='Absolute path to the local PX4-Autopilot checkout.',
         ),
         DeclareLaunchArgument(

@@ -36,7 +36,7 @@
     gimbal_yaw_rad: 0.0
     image_format: jpg
 
-    colmap_bin: colmap
+    colmap_bin: /home/carlos/colmap/build/src/colmap/exe/colmap
     colmap_script_dir: ~/photogrammetry-covisibility/src/photogrammetry_nbv/colmap_scripts
     colmap_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/colmap.yaml
     scoring_config_path: ~/photogrammetry-covisibility/src/photogrammetry_nbv/config/scoring.yaml

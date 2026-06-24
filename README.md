@@ -99,7 +99,69 @@ Scorer selection and all weights are configured in config/scoring.yaml without c
 
 COLMAP reconstructs in an arbitrary coordinate frame. To compare against ground truth and to project candidates into the sparse model, the codebase uses the Umeyama similarity transform -- a closed-form least-squares solution for scale, rotation, and translation that aligns COLMAP camera centers to their known NED positions from flight metadata.
 
-The evaluation pipeline cleans the aligned dense cloud through a sequence of steps: bounding-box crop around the target, RANSAC ground-plane removal (fit on the lowest 20% of points in NED-z), statistical outlier removal (SOR), and a distance gate against the GT mesh surface. Metrics are computed between the cleaned cloud and uniformly sampled GT surface points: completeness, accuracy, F-score at multiple distance thresholds, mean and P95 cloud-to-cloud distance, and Hausdorff distance.
+The evaluation pipeline cleans the aligned dense cloud through a sequence of steps: bounding-box crop around the target, RANSAC ground-plane removal (fit on the lowest 20% of points in NED-z), statistical outlier removal (SOR), and a distance gate against the GT mesh surface. Metrics are computed between the cleaned cloud and uniformly sampled GT surface points: completeness, accuracy, F-score at multiple distance thresholds, and mean/median/P95 cloud-to-cloud distance. Hausdorff distance (GT→recon and recon→GT) is computed separately by `compare_scorers.py`, which also handles multi-run comparisons.
+
+`--gt-transform` is a 4×4 `.npy` matrix mapping the GT mesh's model-local frame into NED; if omitted, the mesh is used as-is. For `lunar_sample_15016` placed at Gazebo ENU (8, 0, 0.8), build it with an ENU→NED rotation (swap X/Y, negate Z) plus translation:
+
+```python
+import numpy as np
+R = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]], dtype=float)
+t = np.array([0, 8, -0.8])          # NED position of model origin
+T = np.eye(4); T[:3, :3] = R; T[:3, 3] = t
+np.save('gt_ned.npy', T)
+```
+
+`eval_and_plot.py` already defaults to an equivalent built-in matrix (with mesh scale 20 baked in) for `lunar_sample_15016` when `--gt-transform` is omitted, so you only need to build your own `.npy` for a different GT model or placement.
+
+### Running Evaluation
+
+The quickest path is the combined script, which auto-discovers seed/NBV clouds in a run directory, aligns them, computes metrics, and plots:
+
+```bash
+python3 src/photogrammetry_nbv/scripts/eval_and_plot.py \
+    --run-dir ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260620_085130 \
+    --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj \
+    --no-show
+```
+
+This writes `report.json`, `trajectory_3d.png`, `metrics.png`, and a two-panel `diagnostics.png` (cloud-to-cloud distance summary and sparse reconstruction evolution over iterations) into the run directory.
+
+To run alignment and evaluation as separate steps instead:
+
+```bash
+# 1. Align the reconstructed cloud to the NED frame
+python3 src/photogrammetry_nbv/scripts/align_cloud.py \
+    --cloud final/dense_cloud.ply \
+    --images-bin colmap/sparse/0/images.bin \
+    --metadata seed/metadata adaptive/metadata \
+    --output aligned_nbv.ply \
+    --bbox-center 0 8 -0.8 \
+    --bbox-half-extent 3.0
+
+# 2. Compute completeness/accuracy/F-score/C2C metrics against GT
+python3 src/photogrammetry_nbv/scripts/evaluate_run.py \
+    --gt-mesh <path/to/gt_mesh.obj> \
+    --gt-transform /tmp/gt_ned.npy \
+    --clouds seed:/tmp/aligned_seed.ply nbv:/tmp/aligned_nbv.ply \
+    --rock-center 0 8 -0.8 \
+    --output-dir eval/ \
+    --thresholds 0.005 0.01 0.02 0.05
+```
+
+To compute Hausdorff distance and compare metrics across multiple scorer runs:
+
+```bash
+python3 src/photogrammetry_nbv/scripts/compare_scorers.py \
+    ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260620_085130 \
+    ~/photogrammetry_NBV/data/photogrammetry/unified_run_20260621_103000 \
+    --gt-mesh ~/PX4-Autopilot/Tools/simulation/gz/models/lunar_sample_15016/meshes/15016-0_SFM_Web-Resolution-Model_Coordinate-Registered.obj \
+    --output-dir ~/photogrammetry_NBV/data/comparisons \
+    --no-show
+```
+
+This accepts one or more `unified_run_*` directories (one per scorer/run to compare) and writes `hausdorff_distance_summary.png` (GT→recon and recon→GT Hausdorff, plus mean/P95 C2C, for sparse and dense clouds) alongside other comparison plots in a timestamped subfolder of `--output-dir`.
+
+See [src/photogrammetry_nbv/README.md](src/photogrammetry_nbv/README.md) for the full per-script argument reference.
 
 ## Project Structure
 
