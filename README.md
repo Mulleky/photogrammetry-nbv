@@ -44,6 +44,19 @@ source install/setup.bash
 
 Because --symlink-install is used, changes to Python files under photogrammetry_nbv/ take effect without rebuilding. A rebuild is only required when setup.py, package.xml, launch files, or config files change.
 
+## PX4 Simulation Assets
+
+The Gazebo world and drone model files are not part of the PX4-Autopilot source tree by default — this repo carries the custom ones under `models/`, and they need to be copied into someone else's PX4-Autopilot checkout before the simulation will find them:
+
+| File/folder in this repo | Destination in `PX4-Autopilot/` |
+|---|---|
+| `models/sample_15016.sdf` | `Tools/simulation/gz/worlds/sample_15016.sdf` (world SDF) |
+| `models/lunar_sample_15016/` | `Tools/simulation/gz/models/lunar_sample_15016/` (custom world model: meshes + `model.sdf`/`model.config`) |
+| `models/x500_gimbal/` | `Tools/simulation/gz/models/x500_gimbal/` (drone model; references the stock `x500` model already shipped with PX4, so it has no meshes of its own) |
+| `models/4022_gz_px4_gsplat` | `ROMFS/px4fmu_common/init.d-posix/airframes/4022_gz_px4_gsplat` (drone airframe startup script) |
+
+After copying the airframe script, register it in `ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt` (add the filename to the list) so it's picked up by the SITL build, then rebuild PX4 (`make px4_sitl`).
+
 ## Running the Simulation
 
 All components launch from a single command in one terminal:
